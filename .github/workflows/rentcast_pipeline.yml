@@ -2,20 +2,26 @@ name: RentCast Sales & New Construction Pipeline
 
 on:
   schedule:
-    # Sales: every Monday at 09:00 UTC (~3-4am Mountain, before the workday)
-    - cron: "0 9 * * 1"
-    # New construction: 1st of each month at 09:15 UTC
+    # Sales: 1st of each month at 09:00 UTC
+    - cron: "0 9 1 * *"
+    # New construction: 1st of each month at 09:15 UTC (staggered to keep
+    # each run's log output separate and easy to read)
     - cron: "15 9 1 * *"
   workflow_dispatch:
     inputs:
       mode:
         description: "Run a specific pull manually (sales or construction)"
-        required: false
+        required: true
         default: "sales"
         type: choice
         options:
           - sales
           - construction
+      window_days:
+        description: "Override the rolling lookback window in days (leave blank to use the script default)"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: write
@@ -51,10 +57,25 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
+      - name: Build window-days flag
+        id: window-flag
+        run: |
+          mode="${{ needs.determine-mode.outputs.mode }}"
+          window="${{ github.event.inputs.window_days }}"
+          if [ -n "$window" ]; then
+            if [ "$mode" = "sales" ]; then
+              echo "flag=--sales-window-days $window" >> "$GITHUB_OUTPUT"
+            else
+              echo "flag=--construction-window-days $window" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "flag=" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run pipeline (${{ needs.determine-mode.outputs.mode }})
         env:
           RENTCAST_API_KEY: ${{ secrets.RENTCAST_API_KEY }}
-        run: python fetch_sales_and_construction.py --mode ${{ needs.determine-mode.outputs.mode }}
+        run: python fetch_sales_and_construction.py --mode ${{ needs.determine-mode.outputs.mode }} ${{ steps.window-flag.outputs.flag }}
 
       - name: Commit and push updated data
         run: |
