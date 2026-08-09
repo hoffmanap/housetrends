@@ -699,6 +699,8 @@ function renderAmenityCharts(){
     }
   });
 }
+
+function lineDataset(label, data, color, fillColor){
   return {
     label, data, borderColor:color, backgroundColor:fillColor,
     pointBackgroundColor:color, borderWidth:3, tension:0.15, fill:!!fillColor,
