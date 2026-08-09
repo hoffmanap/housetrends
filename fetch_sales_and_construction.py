@@ -6,12 +6,20 @@ Two independent pulls against the RentCast API, each writing to its own
 append-only CSV with local dedup (no re-processing of records already
 captured). Designed to run on a schedule via GitHub Actions:
 
-    --mode sales         weekly.  Pulls /properties with a rolling
-                          saleDateRange window to catch late-recorded
-                          county sales (non-disclosure lag).
-    --mode construction   monthly. Pulls /listings/sale filtered to
-                          listingType=New Construction with a rolling
-                          daysOld window.
+    --mode sales           monthly. Pulls /properties with a wide rolling
+                            saleDateRange window (default 120 days) to
+                            maximize the odds of catching a disclosed sale
+                            price in a non-disclosure state, and to absorb
+                            county recording lag.
+    --mode construction     monthly. Pulls /listings/sale filtered to
+                            listingType=New Construction with a rolling
+                            daysOld window (default 60 days).
+
+Both windows are overridable per-run for ad hoc diagnostics without
+editing code, e.g. to test how many disclosed sales exist over a much
+longer lookback:
+
+    python fetch_sales_and_construction.py --mode sales --sales-window-days 365
 
 Usage:
     python fetch_sales_and_construction.py --mode sales
@@ -43,8 +51,11 @@ STATE = "TX"
 # Rolling lookback windows. Both intentionally overlap the pull cadence
 # so a record that posts late to county/MLS data still gets caught on
 # a subsequent run instead of falling into a permanent blind spot.
-SALES_LOOKBACK_DAYS = 45       # weekly cadence, ~1.5x overlap
-CONSTRUCTION_LOOKBACK_DAYS = 60  # monthly cadence, ~2x overlap
+# Sales defaults to a wide window because disclosed sale prices in a
+# non-disclosure state are sparse — a narrow window mostly returns
+# nothing. These are defaults only; both are overridable via CLI flags.
+DEFAULT_SALES_LOOKBACK_DAYS = 120        # monthly cadence, ~4x overlap
+DEFAULT_CONSTRUCTION_LOOKBACK_DAYS = 60  # monthly cadence, ~2x overlap
 
 SALES_CSV = DATA_DIR / "el_paso_sales.csv"
 CONSTRUCTION_CSV = DATA_DIR / "el_paso_new_construction.csv"
@@ -129,14 +140,14 @@ def rewrite_csv_with_updates(csv_path: Path, fields: list, updated_rows: dict):
             writer.writerow({k: row.get(k, "") for k in fields})
 
 
-def fetch_sales(api_key: str):
-    print(f"Fetching sales, saleDateRange=*:{SALES_LOOKBACK_DAYS}")
+def fetch_sales(api_key: str, window_days: int):
+    print(f"Fetching sales, saleDateRange=*:{window_days}")
     records = api_get(
         "/properties",
         {
             "city": CITY,
             "state": STATE,
-            "saleDateRange": f"*:{SALES_LOOKBACK_DAYS}",
+            "saleDateRange": f"*:{window_days}",
             "limit": 500,
             "includeTotalCount": "true",
         },
@@ -189,15 +200,15 @@ def fetch_sales(api_key: str):
     print(f"Done. {SALES_CSV} updated.")
 
 
-def fetch_construction(api_key: str):
-    print(f"Fetching new construction, daysOld=*:{CONSTRUCTION_LOOKBACK_DAYS}")
+def fetch_construction(api_key: str, window_days: int):
+    print(f"Fetching new construction, daysOld=*:{window_days}")
     records = api_get(
         "/listings/sale",
         {
             "city": CITY,
             "state": STATE,
             "listingType": "New Construction",
-            "daysOld": f"*:{CONSTRUCTION_LOOKBACK_DAYS}",
+            "daysOld": f"*:{window_days}",
             "status": "Active",
             "limit": 500,
             "includeTotalCount": "true",
@@ -214,7 +225,7 @@ def fetch_construction(api_key: str):
             "city": CITY,
             "state": STATE,
             "listingType": "New Construction",
-            "daysOld": f"*:{CONSTRUCTION_LOOKBACK_DAYS}",
+            "daysOld": f"*:{window_days}",
             "status": "Inactive",
             "limit": 500,
         },
@@ -307,17 +318,25 @@ def fetch_construction(api_key: str):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--mode", choices=["sales", "construction"], required=True)
+    parser.add_argument(
+        "--sales-window-days", type=int, default=DEFAULT_SALES_LOOKBACK_DAYS,
+        help=f"Rolling lookback window in days for the sales pull (default {DEFAULT_SALES_LOOKBACK_DAYS}).",
+    )
+    parser.add_argument(
+        "--construction-window-days", type=int, default=DEFAULT_CONSTRUCTION_LOOKBACK_DAYS,
+        help=f"Rolling lookback window in days for the construction pull (default {DEFAULT_CONSTRUCTION_LOOKBACK_DAYS}).",
+    )
     args = parser.parse_args()
 
     api_key = get_api_key()
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
     if args.mode == "sales":
-        fetch_sales(api_key)
+        fetch_sales(api_key, args.sales_window_days)
     else:
-        fetch_construction(api_key)
+        fetch_construction(api_key, args.construction_window_days)
 
 
 if __name__ == "__main__":
