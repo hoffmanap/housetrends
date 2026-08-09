@@ -388,7 +388,7 @@ function median(arr){
 }
 function monthKey(dateStr){
   if(!dateStr) return null;
-  return dateStr.slice(0,7); // YYYY-MM
+  return String(dateStr).slice(0,7); // YYYY-MM
 }
 
 // ---------- SALES ----------
