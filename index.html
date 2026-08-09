@@ -143,6 +143,19 @@
     font-size:22px;
     margin:8px 0 6px;
   }
+  .period-btn{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12px;
+    text-transform:uppercase;
+    padding:8px 14px;
+    background:#fff;
+    border:2px solid var(--ink);
+    cursor:pointer;
+  }
+  .period-btn.active{
+    background:var(--ink);
+    color:var(--paper);
+  }
   .controls{
     display:flex;
     flex-wrap:wrap;
@@ -257,16 +270,32 @@
 
   <!-- CONSTRUCTION PANEL -->
   <section id="panel-construction" class="panel">
-    <p class="subtitle" style="margin-bottom:20px;">Headline figures compare the most recent full month of new-construction listings against the prior month (MoM) and the same month one year earlier (YoY). Feature fields (rooms, garage, pool) depend on county/MLS data being fully processed and may show partial coverage for the newest listings.</p>
+    <p class="subtitle" style="margin-bottom:20px;">Trends are computed from new-construction listings grouped by the period below. Bedroom, bathroom, size, price, and days-on-market fields come directly from the listing record and are reliably populated. Room count, garage, pool, fireplace, and cooling/heating fields depend on a separate "features" data block that RentCast has not been returning for these listings in practice, so those are omitted here rather than shown mostly blank.</p>
+
+    <div class="controls" id="construction-period-toggle">
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;align-self:center;">GROUP BY:</span>
+      <button class="period-btn" data-period="week" onclick="setConstructionPeriod('week')">Weekly</button>
+      <button class="period-btn active" data-period="month" onclick="setConstructionPeriod('month')">Monthly</button>
+      <button class="period-btn" data-period="quarter" onclick="setConstructionPeriod('quarter')">Quarterly</button>
+      <button class="period-btn" data-period="year" onclick="setConstructionPeriod('year')">Annual</button>
+    </div>
 
     <div class="kpi-row" id="construction-kpis"></div>
 
     <div class="chart-card">
-      <h2>New Construction Listing Volume, by Month</h2>
+      <h2>New Construction Listing Volume</h2>
       <div class="chart-wrap"><canvas id="constructionVolumeChart"></canvas></div>
     </div>
 
     <div class="chart-grid">
+      <div class="chart-card">
+        <h2>Median Asking Price</h2>
+        <div class="chart-wrap small"><canvas id="chartPrice"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h2>Median $ / Sqft</h2>
+        <div class="chart-wrap small"><canvas id="chartPricePerSqft"></canvas></div>
+      </div>
       <div class="chart-card">
         <h2>Median Bedrooms</h2>
         <div class="chart-wrap small"><canvas id="chartBeds"></canvas></div>
@@ -284,40 +313,24 @@
         <div class="chart-wrap small"><canvas id="chartLotSize"></canvas></div>
       </div>
       <div class="chart-card">
-        <h2>Median Room Count</h2>
-        <div class="chart-wrap small"><canvas id="chartRooms"></canvas></div>
-      </div>
-    </div>
-
-    <h2 class="section-heading">Amenities Over Time</h2>
-    <p class="subtitle" style="margin-bottom:20px;">Share of new-construction listings each month reporting each amenity. Coverage depends on how completely the county/MLS record has been processed, so early months may under-report relative to more recent, fully-processed listings.</p>
-
-    <div class="kpi-row" id="amenity-kpis"></div>
-
-    <div class="chart-grid">
-      <div class="chart-card">
-        <h2>Pool</h2>
-        <div class="chart-wrap small"><canvas id="chartPool"></canvas></div>
+        <h2>Median Days on Market</h2>
+        <div class="chart-wrap small"><canvas id="chartDom"></canvas></div>
       </div>
       <div class="chart-card">
-        <h2>Air Conditioning</h2>
-        <div class="chart-wrap small"><canvas id="chartCooling"></canvas></div>
+        <h2>Share of Listings with an HOA</h2>
+        <div class="chart-wrap small"><canvas id="chartHoaShare"></canvas></div>
       </div>
       <div class="chart-card">
-        <h2>Heating</h2>
-        <div class="chart-wrap small"><canvas id="chartHeating"></canvas></div>
+        <h2>Median HOA Fee (where present)</h2>
+        <div class="chart-wrap small"><canvas id="chartHoaFee"></canvas></div>
       </div>
       <div class="chart-card">
-        <h2>Garage</h2>
-        <div class="chart-wrap small"><canvas id="chartGarage"></canvas></div>
+        <h2>Distinct Builders Active</h2>
+        <div class="chart-wrap small"><canvas id="chartBuilders"></canvas></div>
       </div>
-      <div class="chart-card">
-        <h2>Fireplace</h2>
-        <div class="chart-wrap small"><canvas id="chartFireplace"></canvas></div>
-      </div>
-      <div class="chart-card">
-        <h2>All Amenities, Combined</h2>
-        <div class="chart-wrap small"><canvas id="chartAmenities"></canvas></div>
+      <div class="chart-card" style="grid-column:1 / -1;">
+        <h2>Property Type Mix</h2>
+        <div class="chart-wrap small"><canvas id="chartPropertyType"></canvas></div>
       </div>
     </div>
 
@@ -341,12 +354,11 @@
             <th onclick="sortTable('construction',4)">Beds</th>
             <th onclick="sortTable('construction',5)">Baths</th>
             <th onclick="sortTable('construction',6)">Sqft</th>
-            <th onclick="sortTable('construction',7)">Rooms</th>
-            <th onclick="sortTable('construction',8)">Garage</th>
-            <th onclick="sortTable('construction',9)">Pool</th>
-            <th onclick="sortTable('construction',10)">Builder</th>
-            <th onclick="sortTable('construction',11)">Subdivision</th>
-            <th onclick="sortTable('construction',12)">Listed</th>
+            <th onclick="sortTable('construction',7)">Days on Mkt</th>
+            <th onclick="sortTable('construction',8)">HOA Fee</th>
+            <th onclick="sortTable('construction',9)">Builder</th>
+            <th onclick="sortTable('construction',10)">Subdivision</th>
+            <th onclick="sortTable('construction',11)">Listed</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -364,7 +376,7 @@
 let salesData = [];
 let constructionData = [];
 let salesSort = {col:2, dir:-1};
-let constructionSort = {col:9, dir:-1};
+let constructionSort = {col:11, dir:-1};
 
 function showTab(name){
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
@@ -532,42 +544,79 @@ function loadConstruction(){
       constructionData = res.data.filter(r=>r.id);
       renderConstructionKpis();
       renderConstructionChart();
-      renderAmenityKpis();
-      renderAmenityCharts();
       renderConstructionTable();
     },
     error: () => renderEmptyState('construction')
   });
 }
 
-// Builds { month: {count, bedrooms:[], bathrooms:[], squareFootage:[],
-// lotSize:[], roomCount:[], garageN, poolN, fireplaceN, total} }
-// keyed by listedDate's YYYY-MM, sorted ascending.
-function buildMonthlyAgg(){
-  const byMonth = {};
+let constructionPeriod = 'month';
+let constructionChartInstances = {};
+
+function setConstructionPeriod(period){
+  constructionPeriod = period;
+  document.querySelectorAll('#construction-period-toggle .period-btn').forEach(b=>{
+    b.classList.toggle('active', b.dataset.period===period);
+  });
+  renderConstructionKpis();
+  renderConstructionChart();
+}
+
+// Groups a date string into a period bucket key, sortable as a string.
+function periodKey(dateStr, period){
+  if(!dateStr) return null;
+  const s = String(dateStr);
+  const d = new Date(s);
+  if(isNaN(d.getTime())) return null;
+
+  if(period==='year'){
+    return `${d.getUTCFullYear()}`;
+  }
+  if(period==='quarter'){
+    const q = Math.ceil((d.getUTCMonth()+1)/3);
+    return `${d.getUTCFullYear()} Q${q}`;
+  }
+  if(period==='week'){
+    // ISO-ish week bucket: Monday-anchored, labeled by that Monday's date
+    const monday = new Date(d);
+    const day = (d.getUTCDay()+6)%7; // 0=Mon
+    monday.setUTCDate(d.getUTCDate()-day);
+    return monday.toISOString().slice(0,10);
+  }
+  // month
+  return s.slice(0,7);
+}
+
+// Builds { periodKey: {count, bedrooms:[], bathrooms:[], squareFootage:[],
+// lotSize:[], price:[], pricePerSqft:[], daysOnMarket:[], hoaFees:[],
+// hoaN, builders:Set, propertyTypes:{type:count}, total} }
+function buildAgg(period){
+  const byPeriod = {};
   constructionData.forEach(r=>{
-    const mk = monthKey(r.listedDate);
-    if(!mk) return;
-    if(!byMonth[mk]) byMonth[mk] = {
+    const pk = periodKey(r.listedDate, period);
+    if(!pk) return;
+    if(!byPeriod[pk]) byPeriod[pk] = {
       count:0, bedrooms:[], bathrooms:[], squareFootage:[], lotSize:[],
-      roomCount:[], garageN:0, poolN:0, fireplaceN:0, coolingN:0, heatingN:0, total:0,
+      price:[], pricePerSqft:[], daysOnMarket:[], hoaFees:[], hoaN:0,
+      builders:new Set(), propertyTypes:{}, total:0,
     };
-    const m = byMonth[mk];
+    const m = byPeriod[pk];
     m.count += 1;
     m.total += 1;
     if(r.bedrooms) m.bedrooms.push(r.bedrooms);
     if(r.bathrooms) m.bathrooms.push(r.bathrooms);
     if(r.squareFootage) m.squareFootage.push(r.squareFootage);
     if(r.lotSize) m.lotSize.push(r.lotSize);
-    if(r.roomCount) m.roomCount.push(r.roomCount);
-    if(String(r.garage).toLowerCase()==='true') m.garageN += 1;
-    if(String(r.pool).toLowerCase()==='true') m.poolN += 1;
-    if(String(r.fireplace).toLowerCase()==='true') m.fireplaceN += 1;
-    if(String(r.cooling).toLowerCase()==='true') m.coolingN += 1;
-    if(String(r.heating).toLowerCase()==='true') m.heatingN += 1;
+    if(r.price) m.price.push(r.price);
+    if(r.price_per_sqft) m.pricePerSqft.push(r.price_per_sqft);
+    if(r.daysOnMarket !== '' && r.daysOnMarket !== null && r.daysOnMarket !== undefined) m.daysOnMarket.push(r.daysOnMarket);
+    if(r.hoaFee){ m.hoaFees.push(r.hoaFee); m.hoaN += 1; }
+    if(r.builderName) m.builders.add(r.builderName);
+    const pt = r.propertyType || 'Unknown';
+    m.propertyTypes[pt] = (m.propertyTypes[pt]||0) + 1;
   });
-  const months = Object.keys(byMonth).sort();
-  return {months, byMonth};
+  const keys = Object.keys(byPeriod).sort();
+  return {keys, byPeriod};
 }
 
 function pctChange(curr, prev){
@@ -583,144 +632,50 @@ function trendLabel(pct, unit=''){
 }
 
 function renderConstructionKpis(){
-  const {months, byMonth} = buildMonthlyAgg();
+  const {keys, byPeriod} = buildAgg(constructionPeriod);
   const container = document.getElementById('construction-kpis');
 
-  if(months.length < 2){
-    container.innerHTML = `<div class="empty-note">Not enough monthly history yet to compute MoM/YoY trends. Headline cards will populate once at least two months of listings have been captured.</div>`;
+  if(keys.length < 1){
+    container.innerHTML = `<div class="empty-note">No new-construction listings captured yet for this grouping.</div>`;
     return;
   }
 
-  const latest = months[months.length-1];
-  const prevMonth = months[months.length-2];
-  const latestM = byMonth[latest];
-  const prevM = byMonth[prevMonth];
+  const latest = keys[keys.length-1];
+  const prevKey = keys.length>1 ? keys[keys.length-2] : null;
+  const latestM = byPeriod[latest];
+  const prevM = prevKey ? byPeriod[prevKey] : null;
 
-  // YoY: find the month 12 back from latest, if it exists
-  const [ly, lm] = latest.split('-').map(Number);
-  const yoyKey = `${ly-1}-${String(lm).padStart(2,'0')}`;
-  const yoyM = byMonth[yoyKey];
-
+  const medPriceLatest = median(latestM.price);
+  const medPricePrev = prevM ? median(prevM.price) : null;
   const medSqftLatest = median(latestM.squareFootage);
-  const medSqftPrev = median(prevM.squareFootage);
-  const medSqftYoy = yoyM ? median(yoyM.squareFootage) : null;
-
+  const medSqftPrev = prevM ? median(prevM.squareFootage) : null;
   const medBedsLatest = median(latestM.bedrooms);
-  const medBedsPrev = median(prevM.bedrooms);
 
-  const medLotLatest = median(latestM.lotSize);
-  const medLotPrev = median(prevM.lotSize);
-
-  const momCount = pctChange(latestM.count, prevM.count);
-  const yoyCount = yoyM ? pctChange(latestM.count, yoyM.count) : null;
-  const momSqft = pctChange(medSqftLatest, medSqftPrev);
-  const yoySqft = pctChange(medSqftLatest, medSqftYoy);
-  const momBeds = pctChange(medBedsLatest, medBedsPrev);
-  const momLot = pctChange(medLotLatest, medLotPrev);
+  const changeCount = prevM ? pctChange(latestM.count, prevM.count) : null;
+  const changePrice = prevM ? pctChange(medPriceLatest, medPricePrev) : null;
+  const changeSqft = prevM ? pctChange(medSqftLatest, medSqftPrev) : null;
 
   container.innerHTML = `
     <div class="kpi mint">
       <span class="num">${fmtNum(latestM.count)}</span>
       <span class="label">New listings, ${latest}</span>
-      ${trendLabel(momCount,'MoM')}
-      ${yoyM ? trendLabel(yoyCount,'YoY') : ''}
+      ${prevM ? trendLabel(changeCount,'vs prior period') : ''}
     </div>
     <div class="kpi yellow">
-      <span class="num">${medSqftLatest?fmtNum(medSqftLatest):'—'}</span>
-      <span class="label">Median sqft, ${latest}</span>
-      ${trendLabel(momSqft,'MoM')}
-      ${yoyM ? trendLabel(yoySqft,'YoY') : ''}
+      <span class="num">${medPriceLatest?fmtMoney(medPriceLatest):'—'}</span>
+      <span class="label">Median asking price, ${latest}</span>
+      ${prevM ? trendLabel(changePrice,'vs prior period') : ''}
     </div>
     <div class="kpi salmon">
-      <span class="num">${medBedsLatest?fmtNum(medBedsLatest,1):'—'}</span>
-      <span class="label">Median bedrooms, ${latest}</span>
-      ${trendLabel(momBeds,'MoM')}
+      <span class="num">${medSqftLatest?fmtNum(medSqftLatest):'—'}</span>
+      <span class="label">Median sqft, ${latest}</span>
+      ${prevM ? trendLabel(changeSqft,'vs prior period') : ''}
     </div>
     <div class="kpi lavender">
-      <span class="num">${medLotLatest?fmtNum(medLotLatest):'—'}</span>
-      <span class="label">Median lot size (sqft), ${latest}</span>
-      ${trendLabel(momLot,'MoM')}
+      <span class="num">${fmtNum(latestM.builders.size)}</span>
+      <span class="label">Distinct builders, ${latest}</span>
     </div>
   `;
-}
-
-function renderAmenityKpis(){
-  const {months, byMonth} = buildMonthlyAgg();
-  const container = document.getElementById('amenity-kpis');
-  if(months.length < 1){ container.innerHTML=''; return; }
-
-  const latest = months[months.length-1];
-  const prevMonth = months.length>1 ? months[months.length-2] : null;
-  const latestM = byMonth[latest];
-  const prevM = prevMonth ? byMonth[prevMonth] : null;
-
-  const pct = (n,total) => total ? (n/total*100) : null;
-
-  const amenities = [
-    {key:'poolN', label:'Pool', cls:'mint'},
-    {key:'coolingN', label:'Air conditioning', cls:'yellow'},
-    {key:'heatingN', label:'Heating', cls:'salmon'},
-    {key:'garageN', label:'Garage', cls:'lavender'},
-    {key:'fireplaceN', label:'Fireplace', cls:'mint'},
-  ];
-
-  container.innerHTML = amenities.map(a=>{
-    const curr = pct(latestM[a.key], latestM.total);
-    const prev = prevM ? pct(prevM[a.key], prevM.total) : null;
-    const momPts = (curr!==null && prev!==null) ? curr-prev : null;
-    return `
-      <div class="kpi ${a.cls}">
-        <span class="num">${curr!==null?curr.toFixed(0)+'%':'—'}</span>
-        <span class="label">${a.label}, ${latest}</span>
-        ${momPts!==null ? `<span class="trend ${momPts>0.5?'up':(momPts<-0.5?'down':'flat')}">${momPts>0.5?'▲':(momPts<-0.5?'▼':'→')} ${Math.abs(momPts).toFixed(1)} pts MoM</span>` : ''}
-      </div>
-    `;
-  }).join('');
-}
-
-function amenityLineChart(canvasId, months, byMonth, key, color, fillColor){
-  const data = months.map(m => byMonth[m].total ? (byMonth[m][key]/byMonth[m].total*100) : null);
-  new Chart(document.getElementById(canvasId), {
-    type:'line',
-    data:{labels:months, datasets:[{
-      data, borderColor:color, backgroundColor:fillColor, fill:true,
-      pointBackgroundColor:color, borderWidth:3, tension:0.15,
-    }]},
-    options:{
-      responsive:true, maintainAspectRatio:false,
-      plugins:{legend:{display:false}},
-      scales:{y:{ticks:{callback:v=>v+'%'}, min:0, max:100}}
-    }
-  });
-}
-
-function renderAmenityCharts(){
-  const {months, byMonth} = buildMonthlyAgg();
-  if(!months.length) return;
-
-  amenityLineChart('chartPool', months, byMonth, 'poolN', '#111111', '#BFE8D8');
-  amenityLineChart('chartCooling', months, byMonth, 'coolingN', '#111111', '#FCE083');
-  amenityLineChart('chartHeating', months, byMonth, 'heatingN', '#111111', '#F5B4A6');
-  amenityLineChart('chartGarage', months, byMonth, 'garageN', '#111111', '#D8C7F0');
-  amenityLineChart('chartFireplace', months, byMonth, 'fireplaceN', '#111111', '#BFE8D8');
-
-  const pct = (key) => months.map(m => byMonth[m].total ? (byMonth[m][key]/byMonth[m].total*100) : null);
-
-  new Chart(document.getElementById('chartAmenities'), {
-    type:'line',
-    data:{labels:months, datasets:[
-      {label:'Pool', data:pct('poolN'), borderColor:'#0a6b3d', backgroundColor:'transparent', borderWidth:2, tension:0.15},
-      {label:'A/C', data:pct('coolingN'), borderColor:'#a3260a', backgroundColor:'transparent', borderWidth:2, tension:0.15},
-      {label:'Heating', data:pct('heatingN'), borderColor:'#c98a00', backgroundColor:'transparent', borderWidth:2, tension:0.15},
-      {label:'Garage', data:pct('garageN'), borderColor:'#5a3ca0', backgroundColor:'transparent', borderWidth:2, tension:0.15},
-      {label:'Fireplace', data:pct('fireplaceN'), borderColor:'#111111', backgroundColor:'transparent', borderWidth:2, tension:0.15},
-    ]},
-    options:{
-      responsive:true, maintainAspectRatio:false,
-      plugins:{legend:{display:true, position:'bottom', labels:{font:{family:"'IBM Plex Mono',monospace", size:10}, boxWidth:12}}},
-      scales:{y:{ticks:{callback:v=>v+'%'}, min:0, max:100}}
-    }
-  });
 }
 
 function lineDataset(label, data, color, fillColor){
@@ -730,51 +685,84 @@ function lineDataset(label, data, color, fillColor){
   };
 }
 
+function destroyIfExists(id){
+  if(constructionChartInstances[id]){
+    constructionChartInstances[id].destroy();
+    delete constructionChartInstances[id];
+  }
+}
+
+function renderLineChart(id, keys, data, color, fillColor, valueFormatter){
+  destroyIfExists(id);
+  const canvas = document.getElementById(id);
+  if(!canvas) return;
+  constructionChartInstances[id] = new Chart(canvas, {
+    type:'line',
+    data:{labels:keys, datasets:[lineDataset('', data, color, fillColor)]},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{display:false}},
+      scales: valueFormatter ? {y:{ticks:{callback:valueFormatter}}} : {},
+    }
+  });
+}
+
 function renderConstructionChart(){
-  const {months, byMonth} = buildMonthlyAgg();
-  if(!months.length){ return; }
+  const {keys, byPeriod} = buildAgg(constructionPeriod);
+  if(!keys.length) return;
 
-  const counts = months.map(m=>byMonth[m].count);
-  const medBeds = months.map(m=>median(byMonth[m].bedrooms));
-  const medBaths = months.map(m=>median(byMonth[m].bathrooms));
-  const medSqft = months.map(m=>median(byMonth[m].squareFootage));
-  const medLot = months.map(m=>median(byMonth[m].lotSize));
-  const medRooms = months.map(m=>median(byMonth[m].roomCount));
+  const counts = keys.map(k=>byPeriod[k].count);
+  const medPrice = keys.map(k=>median(byPeriod[k].price));
+  const medPps = keys.map(k=>median(byPeriod[k].pricePerSqft));
+  const medBeds = keys.map(k=>median(byPeriod[k].bedrooms));
+  const medBaths = keys.map(k=>median(byPeriod[k].bathrooms));
+  const medSqft = keys.map(k=>median(byPeriod[k].squareFootage));
+  const medLot = keys.map(k=>median(byPeriod[k].lotSize));
+  const medDom = keys.map(k=>median(byPeriod[k].daysOnMarket));
+  const hoaShare = keys.map(k=>byPeriod[k].total ? (byPeriod[k].hoaN/byPeriod[k].total*100) : null);
+  const medHoaFee = keys.map(k=>median(byPeriod[k].hoaFees));
+  const builderCounts = keys.map(k=>byPeriod[k].builders.size);
 
-  new Chart(document.getElementById('constructionVolumeChart'), {
+  destroyIfExists('constructionVolumeChart');
+  constructionChartInstances['constructionVolumeChart'] = new Chart(document.getElementById('constructionVolumeChart'), {
     type:'bar',
-    data:{labels:months, datasets:[{label:'Listings', data:counts, backgroundColor:'#D8C7F0', borderColor:'#111111', borderWidth:2}]},
+    data:{labels:keys, datasets:[{label:'Listings', data:counts, backgroundColor:'#D8C7F0', borderColor:'#111111', borderWidth:2}]},
     options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{y:{ticks:{precision:0}}}}
   });
 
-  new Chart(document.getElementById('chartBeds'), {
-    type:'line',
-    data:{labels:months, datasets:[lineDataset('Median bedrooms', medBeds, '#111111', '#BFE8D8')]},
-    options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}}
-  });
+  renderLineChart('chartPrice', keys, medPrice, '#111111', '#FCE083', v=>'$'+v.toLocaleString());
+  renderLineChart('chartPricePerSqft', keys, medPps, '#111111', '#F5B4A6', v=>'$'+v);
+  renderLineChart('chartBeds', keys, medBeds, '#111111', '#BFE8D8');
+  renderLineChart('chartBaths', keys, medBaths, '#111111', '#FCE083');
+  renderLineChart('chartSqft', keys, medSqft, '#111111', '#F5B4A6');
+  renderLineChart('chartLotSize', keys, medLot, '#111111', '#D8C7F0');
+  renderLineChart('chartDom', keys, medDom, '#111111', '#BFE8D8', v=>v+'d');
+  renderLineChart('chartHoaShare', keys, hoaShare, '#111111', '#D8C7F0', v=>v+'%');
+  renderLineChart('chartHoaFee', keys, medHoaFee, '#111111', '#FCE083', v=>'$'+v);
+  renderLineChart('chartBuilders', keys, builderCounts, '#111111', '#F5B4A6');
 
-  new Chart(document.getElementById('chartBaths'), {
-    type:'line',
-    data:{labels:months, datasets:[lineDataset('Median bathrooms', medBaths, '#111111', '#FCE083')]},
-    options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}}
-  });
+  // Property type mix: stacked bar
+  const allTypes = new Set();
+  keys.forEach(k=>Object.keys(byPeriod[k].propertyTypes).forEach(t=>allTypes.add(t)));
+  const typeList = [...allTypes];
+  const palette = ['#BFE8D8','#FCE083','#F5B4A6','#D8C7F0','#111111','#888888'];
+  const typeDatasets = typeList.map((t,i)=>({
+    label:t,
+    data: keys.map(k=>byPeriod[k].propertyTypes[t]||0),
+    backgroundColor: palette[i % palette.length],
+    borderColor:'#111111',
+    borderWidth:1,
+  }));
 
-  new Chart(document.getElementById('chartSqft'), {
-    type:'line',
-    data:{labels:months, datasets:[lineDataset('Median sqft', medSqft, '#111111', '#F5B4A6')]},
-    options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}}
-  });
-
-  new Chart(document.getElementById('chartLotSize'), {
-    type:'line',
-    data:{labels:months, datasets:[lineDataset('Median lot size', medLot, '#111111', '#D8C7F0')]},
-    options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}}
-  });
-
-  new Chart(document.getElementById('chartRooms'), {
-    type:'line',
-    data:{labels:months, datasets:[lineDataset('Median room count', medRooms, '#111111', '#BFE8D8')]},
-    options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}}
+  destroyIfExists('chartPropertyType');
+  constructionChartInstances['chartPropertyType'] = new Chart(document.getElementById('chartPropertyType'), {
+    type:'bar',
+    data:{labels:keys, datasets:typeDatasets},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{display:true, position:'bottom', labels:{font:{family:"'IBM Plex Mono',monospace", size:10}, boxWidth:12}}},
+      scales:{x:{stacked:true}, y:{stacked:true, ticks:{precision:0}}}
+    }
   });
 }
 
@@ -791,7 +779,7 @@ function renderConstructionTable(){
   const cols = [
     r=>r.formattedAddress, r=>r.status, r=>r.price, r=>r.price_per_sqft,
     r=>r.bedrooms, r=>r.bathrooms, r=>r.squareFootage,
-    r=>r.roomCount, r=>r.garage, r=>r.pool,
+    r=>r.daysOnMarket, r=>r.hoaFee,
     r=>r.builderName, r=>r.subdivision, r=>r.listedDate,
   ];
   rows.sort((a,b)=>{
@@ -812,14 +800,13 @@ function renderConstructionTable(){
       <td>${fmtNum(r.bedrooms)}</td>
       <td>${fmtNum(r.bathrooms)}</td>
       <td>${fmtNum(r.squareFootage)}</td>
-      <td>${r.roomCount?fmtNum(r.roomCount):'—'}</td>
-      <td>${String(r.garage).toLowerCase()==='true'?'Yes':(String(r.garage).toLowerCase()==='false'?'No':'—')}</td>
-      <td>${String(r.pool).toLowerCase()==='true'?'Yes':(String(r.pool).toLowerCase()==='false'?'No':'—')}</td>
+      <td>${(r.daysOnMarket!==''&&r.daysOnMarket!==null&&r.daysOnMarket!==undefined)?fmtNum(r.daysOnMarket):'—'}</td>
+      <td>${r.hoaFee?fmtMoney(r.hoaFee):'—'}</td>
       <td>${r.builderName||'—'}</td>
       <td>${r.subdivision||'—'}</td>
       <td>${r.listedDate?String(r.listedDate).slice(0,10):'—'}</td>
     </tr>
-  `).join('') || '<tr><td colspan="13">No matching records.</td></tr>';
+  `).join('') || '<tr><td colspan="12">No matching records.</td></tr>';
 }
 
 function sortTable(which,col){
