@@ -1,0 +1,69 @@
+name: RentCast Sales & New Construction Pipeline
+
+on:
+  schedule:
+    # Sales: every Monday at 09:00 UTC (~3-4am Mountain, before the workday)
+    - cron: "0 9 * * 1"
+    # New construction: 1st of each month at 09:15 UTC
+    - cron: "15 9 1 * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Run a specific pull manually (sales or construction)"
+        required: false
+        default: "sales"
+        type: choice
+        options:
+          - sales
+          - construction
+
+permissions:
+  contents: write
+
+jobs:
+  determine-mode:
+    runs-on: ubuntu-latest
+    outputs:
+      mode: ${{ steps.set-mode.outputs.mode }}
+    steps:
+      - id: set-mode
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "mode=${{ github.event.inputs.mode }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "15 9 1 * *" ]; then
+            echo "mode=construction" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=sales" >> "$GITHUB_OUTPUT"
+          fi
+
+  run-pipeline:
+    needs: determine-mode
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run pipeline (${{ needs.determine-mode.outputs.mode }})
+        env:
+          RENTCAST_API_KEY: ${{ secrets.RENTCAST_API_KEY }}
+        run: python fetch_sales_and_construction.py --mode ${{ needs.determine-mode.outputs.mode }}
+
+      - name: Commit and push updated data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/*.csv
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Update ${{ needs.determine-mode.outputs.mode }} data ($(date -u +%Y-%m-%d))"
+            git push
+          fi
