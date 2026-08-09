@@ -223,9 +223,10 @@
   <!-- SALES PANEL -->
   <section id="panel-sales" class="panel active">
     <div class="kpi-row" id="sales-kpis"></div>
+    <p class="empty-note" id="sales-sample-note" style="margin-bottom:24px;"></p>
 
     <div class="chart-card">
-      <h2>Median Recorded Sale Price, by Month</h2>
+      <h2>Median Recorded Sale Price, by Quarter</h2>
       <div class="chart-wrap"><canvas id="salesChart"></canvas></div>
     </div>
 
@@ -416,6 +417,16 @@ function populateZipOptions(){
   });
 }
 
+function quarterKey(dateStr){
+  if(!dateStr) return null;
+  const s = String(dateStr);
+  const year = s.slice(0,4);
+  const month = parseInt(s.slice(5,7),10);
+  if(!year || !month) return null;
+  const q = Math.ceil(month/3);
+  return `${year} Q${q}`;
+}
+
 function renderSalesKpis(){
   const prices = salesData.map(r=>r.lastSalePrice).filter(v=>v);
   const pps = salesData.map(r=>r.price_per_sqft).filter(v=>v);
@@ -426,22 +437,27 @@ function renderSalesKpis(){
     <div class="kpi salmon"><span class="num">${pps.length?'$'+fmtNum(median(pps),0):'—'}</span><span class="label">Median $ / sqft</span></div>
     <div class="kpi lavender"><span class="num">${fmtNum(new Set(salesData.map(r=>r['zipCode'])).size)}</span><span class="label">Zip codes represented</span></div>
   `;
+  const note = document.getElementById('sales-sample-note');
+  if(note){
+    note.innerHTML = `<strong>n = ${salesData.length}</strong> disclosed sale prices on record. Texas is a non-disclosure state, so most recorded sales never carry a public price &mdash; this is not the full sales volume for El Paso, only the small subset RentCast can report a price for. Treat trends here as directional, not comprehensive.`;
+  }
 }
 
 function renderSalesChart(){
-  const byMonth = {};
+  const byQuarter = {};
   salesData.forEach(r=>{
-    const mk = monthKey(r.lastSaleDate);
-    if(!mk) return;
-    (byMonth[mk] = byMonth[mk] || []).push(r.lastSalePrice);
+    const qk = quarterKey(r.lastSaleDate);
+    if(!qk) return;
+    (byQuarter[qk] = byQuarter[qk] || []).push(r.lastSalePrice);
   });
-  const months = Object.keys(byMonth).sort();
-  const medians = months.map(m=>median(byMonth[m]));
+  const quarters = Object.keys(byQuarter).sort();
+  const medians = quarters.map(q=>median(byQuarter[q]));
+  const counts = quarters.map(q=>byQuarter[q].length);
 
   new Chart(document.getElementById('salesChart'), {
     type:'line',
     data:{
-      labels:months,
+      labels:quarters,
       datasets:[{
         label:'Median sale price',
         data:medians,
@@ -455,7 +471,14 @@ function renderSalesChart(){
     },
     options:{
       responsive:true, maintainAspectRatio:false,
-      plugins:{legend:{display:false}},
+      plugins:{
+        legend:{display:false},
+        tooltip:{
+          callbacks:{
+            afterLabel: ctx => `n = ${counts[ctx.dataIndex]} disclosed sale(s)`
+          }
+        }
+      },
       scales:{
         y:{ticks:{callback:v=>'$'+v.toLocaleString()}},
       }
