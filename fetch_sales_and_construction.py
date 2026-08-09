@@ -6,11 +6,13 @@ Two independent pulls against the RentCast API, each writing to its own
 append-only CSV with local dedup (no re-processing of records already
 captured). Designed to run on a schedule via GitHub Actions:
 
-    --mode sales           monthly. Pulls /properties with a wide rolling
-                            saleDateRange window (default 120 days) to
-                            maximize the odds of catching a disclosed sale
-                            price in a non-disclosure state, and to absorb
-                            county recording lag.
+    --mode sales           quarterly. Pulls /properties with a full
+                            trailing-year saleDateRange window (default
+                            365 days). Texas non-disclosure rules mean
+                            only a small fraction of sales carry a public
+                            price (~18/year observed for El Paso), so this
+                            trades cadence for window width rather than
+                            the reverse.
     --mode construction     monthly. Pulls /listings/sale filtered to
                             listingType=New Construction with a rolling
                             daysOld window (default 60 days).
@@ -51,10 +53,12 @@ STATE = "TX"
 # Rolling lookback windows. Both intentionally overlap the pull cadence
 # so a record that posts late to county/MLS data still gets caught on
 # a subsequent run instead of falling into a permanent blind spot.
-# Sales defaults to a wide window because disclosed sale prices in a
-# non-disclosure state are sparse — a narrow window mostly returns
-# nothing. These are defaults only; both are overridable via CLI flags.
-DEFAULT_SALES_LOOKBACK_DAYS = 120        # monthly cadence, ~4x overlap
+# Sales defaults to a full year: Texas non-disclosure rules mean only a
+# small fraction of actual sales carry a public price (confirmed via
+# manual test: 18 disclosed sales over a trailing 365-day window for
+# El Paso), so going wider doesn't meaningfully improve the catch rate
+# and the practical ceiling is "however many disclose in a year."
+DEFAULT_SALES_LOOKBACK_DAYS = 365        # quarterly cadence, ~4x overlap
 DEFAULT_CONSTRUCTION_LOOKBACK_DAYS = 60  # monthly cadence, ~2x overlap
 
 SALES_CSV = DATA_DIR / "el_paso_sales.csv"
@@ -338,6 +342,9 @@ def main():
     else:
         fetch_construction(api_key, args.construction_window_days)
 
+
+if __name__ == "__main__":
+    main()
 
 if __name__ == "__main__":
     main()
