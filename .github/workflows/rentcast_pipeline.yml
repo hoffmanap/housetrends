@@ -2,10 +2,12 @@ name: RentCast Sales & New Construction Pipeline
 
 on:
   schedule:
-    # Sales: 1st of each month at 09:00 UTC
-    - cron: "0 9 1 * *"
-    # New construction: 1st of each month at 09:15 UTC (staggered to keep
-    # each run's log output separate and easy to read)
+    # Sales: quarterly, 1st of Jan/Apr/Jul/Oct at 09:00 UTC. Disclosed
+    # sale prices are sparse in TX (non-disclosure state), so this trades
+    # cadence for a full trailing-year window instead of pulling more
+    # often against the same thin trickle of data.
+    - cron: "0 9 1 1,4,7,10 *"
+    # New construction: 1st of every month at 09:15 UTC
     - cron: "15 9 1 * *"
   workflow_dispatch:
     inputs:
