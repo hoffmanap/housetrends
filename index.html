@@ -156,6 +156,22 @@
     background:var(--ink);
     color:var(--paper);
   }
+  .download-btn{
+    display:inline-block;
+    font-family:'Archivo Black',sans-serif;
+    text-transform:uppercase;
+    font-size:14px;
+    padding:14px 28px;
+    background:var(--yellow);
+    color:var(--ink);
+    border:var(--border);
+    box-shadow:var(--shadow);
+    text-decoration:none;
+  }
+  .download-btn:hover{
+    transform:translate(2px,2px);
+    box-shadow:2px 2px 0 var(--ink);
+  }
   .controls{
     display:flex;
     flex-wrap:wrap;
@@ -238,33 +254,43 @@
     <div class="kpi-row" id="sales-kpis"></div>
     <p class="empty-note" id="sales-sample-note" style="margin-bottom:24px;"></p>
 
+    <div class="controls" id="sales-period-toggle">
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;align-self:center;">GROUP BY:</span>
+      <button class="period-btn" data-period="week" onclick="setSalesPeriod('week')">Weekly</button>
+      <button class="period-btn" data-period="month" onclick="setSalesPeriod('month')">Monthly</button>
+      <button class="period-btn active" data-period="quarter" onclick="setSalesPeriod('quarter')">Quarterly</button>
+      <button class="period-btn" data-period="year" onclick="setSalesPeriod('year')">Annual</button>
+    </div>
+
     <div class="chart-card">
-      <h2>Median Recorded Sale Price, by Quarter</h2>
+      <h2>Median Recorded Sale Price</h2>
       <div class="chart-wrap"><canvas id="salesChart"></canvas></div>
     </div>
 
-    <div class="controls">
-      <input type="text" id="sales-search" placeholder="Filter by address or zip..." oninput="renderSalesTable()">
-      <select id="sales-zip" onchange="renderSalesTable()"><option value="">All zip codes</option></select>
+    <div class="chart-card">
+      <h2>Sales Volume</h2>
+      <div class="chart-wrap"><canvas id="salesVolumeChart"></canvas></div>
     </div>
 
-    <div class="table-wrap">
-      <table id="sales-table">
-        <thead>
-          <tr>
-            <th onclick="sortTable('sales',0)">Address</th>
-            <th onclick="sortTable('sales',1)">Zip</th>
-            <th onclick="sortTable('sales',2)">Sale Date</th>
-            <th onclick="sortTable('sales',3)">Sale Price</th>
-            <th onclick="sortTable('sales',4)">$ / sqft</th>
-            <th onclick="sortTable('sales',5)">Beds</th>
-            <th onclick="sortTable('sales',6)">Baths</th>
-            <th onclick="sortTable('sales',7)">Sqft</th>
-            <th onclick="sortTable('sales',8)">Year Built</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
+    <h2 class="section-heading">Market Overview: New Construction vs. Resale</h2>
+    <p class="subtitle" style="margin-bottom:20px;">Every sale record is checked against the new-construction listings file by address. A match means that property appeared as a new-construction listing at some point; everything else is treated as resale. Address matching is exact-normalized text, so a small number of true matches may be missed due to formatting differences between sources.</p>
+
+    <div class="kpi-row" id="market-overview-kpis"></div>
+
+    <div class="chart-card">
+      <h2>New Construction Share of Sales</h2>
+      <div class="chart-wrap small"><canvas id="chartNewConstructionShare"></canvas></div>
+    </div>
+
+    <div class="chart-card">
+      <h2>Median Sale Price: New Construction vs. Resale</h2>
+      <div class="chart-wrap small"><canvas id="chartPriceByType"></canvas></div>
+    </div>
+
+    <div class="chart-card" style="text-align:center;">
+      <h2 style="margin-bottom:12px;">Full Sales Dataset</h2>
+      <p style="font-family:'Fraunces',serif;margin-bottom:16px;">Every record backing these charts, including source and address detail, is available as a raw CSV download rather than a full on-page listing.</p>
+      <a href="data/el_paso_sales.csv" download class="download-btn">Download el_paso_sales.csv</a>
     </div>
   </section>
 
@@ -374,8 +400,8 @@
 
 <script>
 let salesData = [];
+const MLS_CUTOFF_DATE = "2025-08-31"; // keep in sync with fetch_sales_and_construction.py
 let constructionData = [];
-let salesSort = {col:2, dir:-1};
 let constructionSort = {col:11, dir:-1};
 
 function showTab(name){
@@ -405,38 +431,47 @@ function monthKey(dateStr){
 }
 
 // ---------- SALES ----------
+let salesPeriod = 'quarter';
+let salesLoaded = false;
+let constructionLoaded = false;
+let salesChartInstances = {};
+
 function loadSales(){
   Papa.parse('data/el_paso_sales.csv', {
     download:true, header:true, dynamicTyping:true, skipEmptyLines:true,
     complete: res => {
       salesData = res.data.filter(r=>r.id);
-      populateZipOptions();
+      salesLoaded = true;
       renderSalesKpis();
       renderSalesChart();
-      renderSalesTable();
+      renderMarketOverviewIfReady();
     },
     error: () => renderEmptyState('sales')
   });
 }
 
-function populateZipOptions(){
-  const zips = [...new Set(salesData.map(r=>r['zipCode']).filter(Boolean))].sort();
-  const sel = document.getElementById('sales-zip');
-  zips.forEach(z=>{
-    const opt = document.createElement('option');
-    opt.value=z; opt.textContent=z;
-    sel.appendChild(opt);
+function setSalesPeriod(period){
+  salesPeriod = period;
+  document.querySelectorAll('#sales-period-toggle .period-btn').forEach(b=>{
+    b.classList.toggle('active', b.dataset.period===period);
   });
+  renderSalesKpis();
+  renderSalesChart();
+  renderMarketOverviewIfReady();
 }
 
-function quarterKey(dateStr){
-  if(!dateStr) return null;
-  const s = String(dateStr);
-  const year = s.slice(0,4);
-  const month = parseInt(s.slice(5,7),10);
-  if(!year || !month) return null;
-  const q = Math.ceil(month/3);
-  return `${year} Q${q}`;
+function buildSalesAgg(period){
+  const byPeriod = {};
+  salesData.forEach(r=>{
+    const pk = periodKey(r.lastSaleDate, period);
+    if(!pk) return;
+    if(!byPeriod[pk]) byPeriod[pk] = {prices:[], pps:[], count:0};
+    byPeriod[pk].prices.push(r.lastSalePrice);
+    if(r.price_per_sqft) byPeriod[pk].pps.push(r.price_per_sqft);
+    byPeriod[pk].count += 1;
+  });
+  const keys = Object.keys(byPeriod).sort();
+  return {keys, byPeriod};
 }
 
 function renderSalesKpis(){
@@ -444,32 +479,36 @@ function renderSalesKpis(){
   const pps = salesData.map(r=>r.price_per_sqft).filter(v=>v);
   const container = document.getElementById('sales-kpis');
   container.innerHTML = `
-    <div class="kpi mint"><span class="num">${fmtNum(salesData.length)}</span><span class="label">Disclosed sales on record</span></div>
+    <div class="kpi mint"><span class="num">${fmtNum(salesData.length)}</span><span class="label">Sales on record</span></div>
     <div class="kpi yellow"><span class="num">${fmtMoney(median(prices))}</span><span class="label">Median sale price</span></div>
     <div class="kpi salmon"><span class="num">${pps.length?'$'+fmtNum(median(pps),0):'—'}</span><span class="label">Median $ / sqft</span></div>
     <div class="kpi lavender"><span class="num">${fmtNum(new Set(salesData.map(r=>r['zipCode'])).size)}</span><span class="label">Zip codes represented</span></div>
   `;
   const note = document.getElementById('sales-sample-note');
   if(note){
-    note.innerHTML = `<strong>n = ${salesData.length}</strong> disclosed sale prices on record. Texas is a non-disclosure state, so most recorded sales never carry a public price &mdash; this is not the full sales volume for El Paso, only the small subset RentCast can report a price for. Treat trends here as directional, not comprehensive.`;
+    const mlsCount = salesData.filter(r=>r.source==='mls').length;
+    const otherCount = salesData.length - mlsCount;
+    note.innerHTML = `<strong>n = ${salesData.length}</strong> sale records on file. ${fmtNum(mlsCount)} come from a comprehensive MLS closed-sales export (through ${MLS_CUTOFF_DATE}); the remaining ${fmtNum(otherCount)} are disclosed sale prices from RentCast, covering periods MLS doesn't (both before MLS coverage begins and, on an ongoing basis, after it ends). Texas is a non-disclosure state, so the RentCast-only portion is a small, non-representative subset &mdash; treat any period covered solely by RentCast as directional, not comprehensive.`;
+  }
+}
+
+function destroySalesChart(id){
+  if(salesChartInstances[id]){
+    salesChartInstances[id].destroy();
+    delete salesChartInstances[id];
   }
 }
 
 function renderSalesChart(){
-  const byQuarter = {};
-  salesData.forEach(r=>{
-    const qk = quarterKey(r.lastSaleDate);
-    if(!qk) return;
-    (byQuarter[qk] = byQuarter[qk] || []).push(r.lastSalePrice);
-  });
-  const quarters = Object.keys(byQuarter).sort();
-  const medians = quarters.map(q=>median(byQuarter[q]));
-  const counts = quarters.map(q=>byQuarter[q].length);
+  const {keys, byPeriod} = buildSalesAgg(salesPeriod);
+  const medians = keys.map(k=>median(byPeriod[k].prices));
+  const counts = keys.map(k=>byPeriod[k].count);
 
-  new Chart(document.getElementById('salesChart'), {
+  destroySalesChart('salesChart');
+  salesChartInstances['salesChart'] = new Chart(document.getElementById('salesChart'), {
     type:'line',
     data:{
-      labels:quarters,
+      labels:keys,
       datasets:[{
         label:'Median sale price',
         data:medians,
@@ -485,55 +524,106 @@ function renderSalesChart(){
       responsive:true, maintainAspectRatio:false,
       plugins:{
         legend:{display:false},
-        tooltip:{
-          callbacks:{
-            afterLabel: ctx => `n = ${counts[ctx.dataIndex]} disclosed sale(s)`
-          }
-        }
+        tooltip:{ callbacks:{ afterLabel: ctx => `n = ${counts[ctx.dataIndex]} sale(s)` } }
       },
-      scales:{
-        y:{ticks:{callback:v=>'$'+v.toLocaleString()}},
-      }
+      scales:{ y:{ticks:{callback:v=>'$'+v.toLocaleString()}} }
     }
+  });
+
+  destroySalesChart('salesVolumeChart');
+  salesChartInstances['salesVolumeChart'] = new Chart(document.getElementById('salesVolumeChart'), {
+    type:'bar',
+    data:{labels:keys, datasets:[{label:'Sales', data:counts, backgroundColor:'#BFE8D8', borderColor:'#111111', borderWidth:2}]},
+    options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{y:{ticks:{precision:0}}}}
   });
 }
 
-function renderSalesTable(){
-  const search = document.getElementById('sales-search').value.toLowerCase();
-  const zip = document.getElementById('sales-zip').value;
-  let rows = salesData.filter(r=>{
-    const matchesSearch = !search || (r.formattedAddress||'').toLowerCase().includes(search) || String(r.zipCode||'').includes(search);
-    const matchesZip = !zip || String(r.zipCode)===String(zip);
-    return matchesSearch && matchesZip;
+// ---------- MARKET OVERVIEW (sales x new construction) ----------
+function normalizeAddress(addr){
+  if(!addr) return '';
+  return String(addr)
+    .toUpperCase()
+    .replace(/,.*$/, '')          // drop everything from the first comma (city/state/zip)
+    .replace(/[^A-Z0-9 ]/g, '')   // strip punctuation
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function renderMarketOverviewIfReady(){
+  if(!salesLoaded || !constructionLoaded) return;
+
+  const ncAddresses = new Set(
+    constructionData.map(r=>normalizeAddress(r.formattedAddress)).filter(Boolean)
+  );
+
+  const tagged = salesData.map(r=>({
+    ...r,
+    _isNewConstruction: ncAddresses.has(normalizeAddress(r.formattedAddress)),
+  }));
+
+  const ncSales = tagged.filter(r=>r._isNewConstruction);
+  const resales = tagged.filter(r=>!r._isNewConstruction);
+
+  const container = document.getElementById('market-overview-kpis');
+  const ncShare = tagged.length ? (ncSales.length/tagged.length*100) : null;
+  container.innerHTML = `
+    <div class="kpi mint"><span class="num">${ncShare!==null?ncShare.toFixed(1)+'%':'—'}</span><span class="label">Sales matched to new construction</span></div>
+    <div class="kpi yellow"><span class="num">${fmtNum(ncSales.length)}</span><span class="label">New construction sales matched</span></div>
+    <div class="kpi salmon"><span class="num">${fmtMoney(median(ncSales.map(r=>r.lastSalePrice).filter(v=>v)))}</span><span class="label">Median new-construction sale price</span></div>
+    <div class="kpi lavender"><span class="num">${fmtMoney(median(resales.map(r=>r.lastSalePrice).filter(v=>v)))}</span><span class="label">Median resale price</span></div>
+  `;
+
+  // Share-over-time chart
+  const byPeriod = {};
+  tagged.forEach(r=>{
+    const pk = periodKey(r.lastSaleDate, salesPeriod);
+    if(!pk) return;
+    if(!byPeriod[pk]) byPeriod[pk] = {total:0, nc:0};
+    byPeriod[pk].total += 1;
+    if(r._isNewConstruction) byPeriod[pk].nc += 1;
+  });
+  const keys = Object.keys(byPeriod).sort();
+  const shareData = keys.map(k=>byPeriod[k].total ? (byPeriod[k].nc/byPeriod[k].total*100) : null);
+
+  destroySalesChart('chartNewConstructionShare');
+  salesChartInstances['chartNewConstructionShare'] = new Chart(document.getElementById('chartNewConstructionShare'), {
+    type:'line',
+    data:{labels:keys, datasets:[{
+      data:shareData, borderColor:'#111111', backgroundColor:'#D8C7F0', fill:true,
+      pointBackgroundColor:'#111111', borderWidth:3, tension:0.15,
+    }]},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{display:false}},
+      scales:{y:{ticks:{callback:v=>v+'%'}, min:0, max:100}}
+    }
   });
 
-  const cols = [
-    r=>r.formattedAddress, r=>r.zipCode, r=>r.lastSaleDate,
-    r=>r.lastSalePrice, r=>r.price_per_sqft, r=>r.bedrooms,
-    r=>r.bathrooms, r=>r.squareFootage, r=>r.yearBuilt,
-  ];
-  rows.sort((a,b)=>{
-    const va=cols[salesSort.col](a), vb=cols[salesSort.col](b);
-    if(va===vb) return 0;
-    if(va===undefined||va===null||va==='') return 1;
-    if(vb===undefined||vb===null||vb==='') return -1;
-    return (va>vb?1:-1)*salesSort.dir;
+  // Median price comparison chart, same period grouping
+  const byPeriodPrice = {};
+  tagged.forEach(r=>{
+    const pk = periodKey(r.lastSaleDate, salesPeriod);
+    if(!pk || !r.lastSalePrice) return;
+    if(!byPeriodPrice[pk]) byPeriodPrice[pk] = {nc:[], resale:[]};
+    (r._isNewConstruction ? byPeriodPrice[pk].nc : byPeriodPrice[pk].resale).push(r.lastSalePrice);
   });
+  const priceKeys = Object.keys(byPeriodPrice).sort();
+  const ncMedians = priceKeys.map(k=>median(byPeriodPrice[k].nc));
+  const resaleMedians = priceKeys.map(k=>median(byPeriodPrice[k].resale));
 
-  const tbody = document.querySelector('#sales-table tbody');
-  tbody.innerHTML = rows.map(r=>`
-    <tr>
-      <td>${r.formattedAddress||'—'}</td>
-      <td>${r.zipCode||'—'}</td>
-      <td>${r.lastSaleDate?String(r.lastSaleDate).slice(0,10):'—'}</td>
-      <td>${fmtMoney(r.lastSalePrice)}</td>
-      <td>${r.price_per_sqft?'$'+fmtNum(r.price_per_sqft):'—'}</td>
-      <td>${fmtNum(r.bedrooms)}</td>
-      <td>${fmtNum(r.bathrooms)}</td>
-      <td>${fmtNum(r.squareFootage)}</td>
-      <td>${fmtNum(r.yearBuilt)}</td>
-    </tr>
-  `).join('') || '<tr><td colspan="9">No matching records.</td></tr>';
+  destroySalesChart('chartPriceByType');
+  salesChartInstances['chartPriceByType'] = new Chart(document.getElementById('chartPriceByType'), {
+    type:'line',
+    data:{labels:priceKeys, datasets:[
+      {label:'New construction', data:ncMedians, borderColor:'#0a6b3d', backgroundColor:'transparent', borderWidth:2, tension:0.15, spanGaps:true},
+      {label:'Resale', data:resaleMedians, borderColor:'#a3260a', backgroundColor:'transparent', borderWidth:2, tension:0.15, spanGaps:true},
+    ]},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{display:true, position:'bottom', labels:{font:{family:"'IBM Plex Mono',monospace", size:11}}}},
+      scales:{y:{ticks:{callback:v=>'$'+v.toLocaleString()}}}
+    }
+  });
 }
 
 // ---------- CONSTRUCTION ----------
@@ -542,9 +632,11 @@ function loadConstruction(){
     download:true, header:true, dynamicTyping:true, skipEmptyLines:true,
     complete: res => {
       constructionData = res.data.filter(r=>r.id);
+      constructionLoaded = true;
       renderConstructionKpis();
       renderConstructionChart();
       renderConstructionTable();
+      renderMarketOverviewIfReady();
     },
     error: () => renderEmptyState('construction')
   });
@@ -810,9 +902,9 @@ function renderConstructionTable(){
 }
 
 function sortTable(which,col){
-  const sortState = which==='sales' ? salesSort : constructionSort;
+  const sortState = constructionSort;
   if(sortState.col===col){ sortState.dir *= -1; } else { sortState.col=col; sortState.dir=1; }
-  which==='sales' ? renderSalesTable() : renderConstructionTable();
+  renderConstructionTable();
 }
 
 function renderEmptyState(which){
