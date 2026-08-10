@@ -8,6 +8,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,500&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <style>
   :root{
     --ink:#111111;
@@ -172,6 +174,20 @@
     transform:translate(2px,2px);
     box-shadow:2px 2px 0 var(--ink);
   }
+  .map-wrap{
+    height:460px;
+    border:2px solid var(--ink);
+  }
+  .map-legend{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12px;
+    display:flex;
+    gap:16px;
+    flex-wrap:wrap;
+    margin-top:10px;
+  }
+  .map-legend span{display:flex;align-items:center;gap:6px;}
+  .legend-dot{width:10px;height:10px;border-radius:50%;display:inline-block;border:1.5px solid var(--ink);}
   .controls{
     display:flex;
     flex-wrap:wrap;
@@ -272,8 +288,41 @@
       <div class="chart-wrap"><canvas id="salesVolumeChart"></canvas></div>
     </div>
 
+    <h2 class="section-heading">Property Characteristics Over Time</h2>
+    <p class="subtitle" style="margin-bottom:20px;">Median home size, lot size, bedrooms, and bathrooms for sold properties, grouped by the same period selected above. Useful for tracking whether the mix of what's selling is shifting toward larger or smaller homes over time.</p>
+
+    <div class="chart-grid">
+      <div class="chart-card">
+        <h2>Median Home Size (sqft)</h2>
+        <div class="chart-wrap small"><canvas id="chartSalesSqft"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h2>Median Lot Size (sqft)</h2>
+        <div class="chart-wrap small"><canvas id="chartSalesLotSize"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h2>Median Bedrooms</h2>
+        <div class="chart-wrap small"><canvas id="chartSalesBeds"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h2>Median Bathrooms</h2>
+        <div class="chart-wrap small"><canvas id="chartSalesBaths"></canvas></div>
+      </div>
+    </div>
+
+    <h2 class="section-heading">Sales Activity Map</h2>
+    <p class="subtitle" style="margin-bottom:16px;">Each point is one sale. Color indicates data source. For pages with a very large number of points, a random sample is shown for map performance; the download link below always has the full dataset.</p>
+    <div class="chart-card">
+      <div class="map-wrap" id="salesMap"></div>
+      <div class="map-legend">
+        <span><span class="legend-dot" style="background:#5a3ca0;"></span>MLS</span>
+        <span><span class="legend-dot" style="background:#0a6b3d;"></span>RentCast (pipeline)</span>
+        <span><span class="legend-dot" style="background:#a3260a;"></span>RentCast (targeted pull)</span>
+      </div>
+    </div>
+
     <h2 class="section-heading">Market Overview: New Construction vs. Resale</h2>
-    <p class="subtitle" style="margin-bottom:20px;">Every sale record is checked against the new-construction listings file by address. A match means that property appeared as a new-construction listing at some point; everything else is treated as resale. Address matching is exact-normalized text, so a small number of true matches may be missed due to formatting differences between sources.</p>
+    <p class="subtitle" style="margin-bottom:20px;">Every sale record is checked against the new-construction listings file by address. A match means that property appeared as a new-construction listing at some point; everything else is treated as resale. Address matching is exact-normalized text, so a small number of true matches may be missed due to formatting differences between sources. If the new-construction dataset only covers a recent time window, matches will be sparse or absent for older sales -- this reflects data coverage, not actual market share.</p>
 
     <div class="kpi-row" id="market-overview-kpis"></div>
 
@@ -360,35 +409,20 @@
       </div>
     </div>
 
-    <div class="controls">
-      <input type="text" id="construction-search" placeholder="Filter by address, builder, or subdivision..." oninput="renderConstructionTable()">
-      <select id="construction-status" onchange="renderConstructionTable()">
-        <option value="">All statuses</option>
-        <option value="Active">Active</option>
-        <option value="Inactive">Inactive / Sold</option>
-      </select>
+    <h2 class="section-heading">New Construction Activity Map</h2>
+    <p class="subtitle" style="margin-bottom:16px;">Each point is one new-construction listing. Color indicates status.</p>
+    <div class="chart-card">
+      <div class="map-wrap" id="constructionMap"></div>
+      <div class="map-legend">
+        <span><span class="legend-dot" style="background:#0a6b3d;"></span>Active</span>
+        <span><span class="legend-dot" style="background:#a3260a;"></span>Inactive / Sold</span>
+      </div>
     </div>
 
-    <div class="table-wrap">
-      <table id="construction-table">
-        <thead>
-          <tr>
-            <th onclick="sortTable('construction',0)">Address</th>
-            <th onclick="sortTable('construction',1)">Status</th>
-            <th onclick="sortTable('construction',2)">Price</th>
-            <th onclick="sortTable('construction',3)">$ / sqft</th>
-            <th onclick="sortTable('construction',4)">Beds</th>
-            <th onclick="sortTable('construction',5)">Baths</th>
-            <th onclick="sortTable('construction',6)">Sqft</th>
-            <th onclick="sortTable('construction',7)">Days on Mkt</th>
-            <th onclick="sortTable('construction',8)">HOA Fee</th>
-            <th onclick="sortTable('construction',9)">Builder</th>
-            <th onclick="sortTable('construction',10)">Subdivision</th>
-            <th onclick="sortTable('construction',11)">Listed</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
+    <div class="chart-card" style="text-align:center;">
+      <h2 style="margin-bottom:12px;">Full New Construction Dataset</h2>
+      <p style="font-family:'Fraunces',serif;margin-bottom:16px;">Every record backing these charts, including builder, subdivision, and status detail, is available as a raw CSV download rather than a full on-page listing.</p>
+      <a href="data/el_paso_new_construction.csv" download class="download-btn">Download el_paso_new_construction.csv</a>
     </div>
   </section>
 
@@ -402,7 +436,6 @@
 let salesData = [];
 const MLS_CUTOFF_DATE = "2025-08-31"; // keep in sync with fetch_sales_and_construction.py
 let constructionData = [];
-let constructionSort = {col:11, dir:-1};
 
 function showTab(name){
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
@@ -444,6 +477,7 @@ function loadSales(){
       salesLoaded = true;
       renderSalesKpis();
       renderSalesChart();
+      renderSalesMap();
       renderMarketOverviewIfReady();
     },
     error: () => renderEmptyState('sales')
@@ -465,10 +499,17 @@ function buildSalesAgg(period){
   salesData.forEach(r=>{
     const pk = periodKey(r.lastSaleDate, period);
     if(!pk) return;
-    if(!byPeriod[pk]) byPeriod[pk] = {prices:[], pps:[], count:0};
-    byPeriod[pk].prices.push(r.lastSalePrice);
-    if(r.price_per_sqft) byPeriod[pk].pps.push(r.price_per_sqft);
-    byPeriod[pk].count += 1;
+    if(!byPeriod[pk]) byPeriod[pk] = {
+      prices:[], pps:[], count:0, sqft:[], lotSize:[], bedrooms:[], bathrooms:[],
+    };
+    const m = byPeriod[pk];
+    m.prices.push(r.lastSalePrice);
+    if(r.price_per_sqft) m.pps.push(r.price_per_sqft);
+    if(r.squareFootage) m.sqft.push(r.squareFootage);
+    if(r.lotSize) m.lotSize.push(r.lotSize);
+    if(r.bedrooms) m.bedrooms.push(r.bedrooms);
+    if(r.bathrooms) m.bathrooms.push(r.bathrooms);
+    m.count += 1;
   });
   const keys = Object.keys(byPeriod).sort();
   return {keys, byPeriod};
@@ -535,6 +576,120 @@ function renderSalesChart(){
     type:'bar',
     data:{labels:keys, datasets:[{label:'Sales', data:counts, backgroundColor:'#BFE8D8', borderColor:'#111111', borderWidth:2}]},
     options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{y:{ticks:{precision:0}}}}
+  });
+
+  const medSqft = keys.map(k=>median(byPeriod[k].sqft));
+  const medLot = keys.map(k=>median(byPeriod[k].lotSize));
+  const medBeds = keys.map(k=>median(byPeriod[k].bedrooms));
+  const medBaths = keys.map(k=>median(byPeriod[k].bathrooms));
+
+  destroySalesChart('chartSalesSqft');
+  salesChartInstances['chartSalesSqft'] = new Chart(document.getElementById('chartSalesSqft'), {
+    type:'line',
+    data:{labels:keys, datasets:[{data:medSqft, borderColor:'#111111', backgroundColor:'#F5B4A6', fill:true, pointBackgroundColor:'#111111', borderWidth:3, tension:0.15}]},
+    options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}}
+  });
+
+  destroySalesChart('chartSalesLotSize');
+  salesChartInstances['chartSalesLotSize'] = new Chart(document.getElementById('chartSalesLotSize'), {
+    type:'line',
+    data:{labels:keys, datasets:[{data:medLot, borderColor:'#111111', backgroundColor:'#D8C7F0', fill:true, pointBackgroundColor:'#111111', borderWidth:3, tension:0.15}]},
+    options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}}
+  });
+
+  destroySalesChart('chartSalesBeds');
+  salesChartInstances['chartSalesBeds'] = new Chart(document.getElementById('chartSalesBeds'), {
+    type:'line',
+    data:{labels:keys, datasets:[{data:medBeds, borderColor:'#111111', backgroundColor:'#BFE8D8', fill:true, pointBackgroundColor:'#111111', borderWidth:3, tension:0.15}]},
+    options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}}
+  });
+
+  destroySalesChart('chartSalesBaths');
+  salesChartInstances['chartSalesBaths'] = new Chart(document.getElementById('chartSalesBaths'), {
+    type:'line',
+    data:{labels:keys, datasets:[{data:medBaths, borderColor:'#111111', backgroundColor:'#FCE083', fill:true, pointBackgroundColor:'#111111', borderWidth:3, tension:0.15}]},
+    options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}}
+  });
+}
+
+// ---------- MAPS ----------
+const EL_PASO_CENTER = [31.7619, -106.4850];
+const MAP_SAMPLE_CAP = 3000; // performance safeguard for very large point sets
+let salesMapInstance = null;
+let constructionMapInstance = null;
+
+function sampleForMap(rows){
+  if(rows.length <= MAP_SAMPLE_CAP) return rows;
+  const shuffled = [...rows].sort(()=>Math.random()-0.5);
+  return shuffled.slice(0, MAP_SAMPLE_CAP);
+}
+
+function renderSalesMap(){
+  const withCoords = salesData.filter(r=>r.latitude && r.longitude);
+  const points = sampleForMap(withCoords);
+
+  if(!salesMapInstance){
+    salesMapInstance = L.map('salesMap', {preferCanvas:true}).setView(EL_PASO_CENTER, 11);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+      maxZoom: 18,
+    }).addTo(salesMapInstance);
+  }
+
+  const colorBySource = {mls:'#5a3ca0', pipeline:'#0a6b3d', targeted_pull:'#a3260a'};
+  points.forEach(r=>{
+    const lat = parseFloat(r.latitude), lon = parseFloat(r.longitude);
+    if(isNaN(lat) || isNaN(lon)) return;
+    L.circleMarker([lat, lon], {
+      radius:4,
+      color:'#111111',
+      weight:1,
+      fillColor: colorBySource[r.source] || '#888888',
+      fillOpacity:0.75,
+    }).bindPopup(`
+      <strong>${r.formattedAddress||'—'}</strong><br>
+      ${fmtMoney(r.lastSalePrice)} &middot; ${r.lastSaleDate?String(r.lastSaleDate).slice(0,10):'—'}<br>
+      ${fmtNum(r.bedrooms)} bd / ${fmtNum(r.bathrooms)} ba &middot; ${fmtNum(r.squareFootage)} sqft
+    `).addTo(salesMapInstance);
+  });
+
+  if(withCoords.length > MAP_SAMPLE_CAP){
+    const note = document.createElement('p');
+    note.className = 'empty-note';
+    note.style.marginTop = '10px';
+    note.style.fontSize = '13px';
+    note.textContent = `Showing a random sample of ${MAP_SAMPLE_CAP.toLocaleString()} of ${withCoords.length.toLocaleString()} geocoded sales for map performance.`;
+    document.getElementById('salesMap').insertAdjacentElement('afterend', note);
+  }
+}
+
+function renderConstructionMap(){
+  const withCoords = constructionData.filter(r=>r.latitude && r.longitude);
+  const points = sampleForMap(withCoords);
+
+  if(!constructionMapInstance){
+    constructionMapInstance = L.map('constructionMap', {preferCanvas:true}).setView(EL_PASO_CENTER, 11);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+      maxZoom: 18,
+    }).addTo(constructionMapInstance);
+  }
+
+  points.forEach(r=>{
+    const lat = parseFloat(r.latitude), lon = parseFloat(r.longitude);
+    if(isNaN(lat) || isNaN(lon)) return;
+    const isActive = r.status === 'Active';
+    L.circleMarker([lat, lon], {
+      radius:4,
+      color:'#111111',
+      weight:1,
+      fillColor: isActive ? '#0a6b3d' : '#a3260a',
+      fillOpacity:0.75,
+    }).bindPopup(`
+      <strong>${r.formattedAddress||'—'}</strong><br>
+      ${fmtMoney(r.price)} &middot; ${r.status||'—'}<br>
+      ${r.builderName||'Builder unknown'}
+    `).addTo(constructionMapInstance);
   });
 }
 
@@ -635,7 +790,7 @@ function loadConstruction(){
       constructionLoaded = true;
       renderConstructionKpis();
       renderConstructionChart();
-      renderConstructionTable();
+      renderConstructionMap();
       renderMarketOverviewIfReady();
     },
     error: () => renderEmptyState('construction')
@@ -858,54 +1013,6 @@ function renderConstructionChart(){
   });
 }
 
-function renderConstructionTable(){
-  const search = document.getElementById('construction-search').value.toLowerCase();
-  const status = document.getElementById('construction-status').value;
-  let rows = constructionData.filter(r=>{
-    const hay = `${r.formattedAddress||''} ${r.builderName||''} ${r.subdivision||''}`.toLowerCase();
-    const matchesSearch = !search || hay.includes(search);
-    const matchesStatus = !status || r.status===status;
-    return matchesSearch && matchesStatus;
-  });
-
-  const cols = [
-    r=>r.formattedAddress, r=>r.status, r=>r.price, r=>r.price_per_sqft,
-    r=>r.bedrooms, r=>r.bathrooms, r=>r.squareFootage,
-    r=>r.daysOnMarket, r=>r.hoaFee,
-    r=>r.builderName, r=>r.subdivision, r=>r.listedDate,
-  ];
-  rows.sort((a,b)=>{
-    const va=cols[constructionSort.col](a), vb=cols[constructionSort.col](b);
-    if(va===vb) return 0;
-    if(va===undefined||va===null||va==='') return 1;
-    if(vb===undefined||vb===null||vb==='') return -1;
-    return (va>vb?1:-1)*constructionSort.dir;
-  });
-
-  const tbody = document.querySelector('#construction-table tbody');
-  tbody.innerHTML = rows.map(r=>`
-    <tr>
-      <td>${r.formattedAddress||'—'}</td>
-      <td><span class="status-pill ${r.status==='Active'?'status-active':'status-inactive'}">${r.status||'—'}</span></td>
-      <td>${fmtMoney(r.price)}</td>
-      <td>${r.price_per_sqft?'$'+fmtNum(r.price_per_sqft):'—'}</td>
-      <td>${fmtNum(r.bedrooms)}</td>
-      <td>${fmtNum(r.bathrooms)}</td>
-      <td>${fmtNum(r.squareFootage)}</td>
-      <td>${(r.daysOnMarket!==''&&r.daysOnMarket!==null&&r.daysOnMarket!==undefined)?fmtNum(r.daysOnMarket):'—'}</td>
-      <td>${r.hoaFee?fmtMoney(r.hoaFee):'—'}</td>
-      <td>${r.builderName||'—'}</td>
-      <td>${r.subdivision||'—'}</td>
-      <td>${r.listedDate?String(r.listedDate).slice(0,10):'—'}</td>
-    </tr>
-  `).join('') || '<tr><td colspan="12">No matching records.</td></tr>';
-}
-
-function sortTable(which,col){
-  const sortState = constructionSort;
-  if(sortState.col===col){ sortState.dir *= -1; } else { sortState.col=col; sortState.dir=1; }
-  renderConstructionTable();
-}
 
 function renderEmptyState(which){
   const el = document.getElementById(which+'-kpis');
