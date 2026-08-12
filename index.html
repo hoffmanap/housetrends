@@ -322,7 +322,7 @@
     </div>
 
     <h2 class="section-heading">Market Overview: New Construction vs. Resale</h2>
-    <p class="subtitle" style="margin-bottom:20px;">Every sale record is checked against the new-construction listings file by address. A match means that property appeared as a new-construction listing at some point; everything else is treated as resale. Address matching is exact-normalized text, so a small number of true matches may be missed due to formatting differences between sources. If the new-construction dataset only covers a recent time window, matches will be sparse or absent for older sales -- this reflects data coverage, not actual market share.</p>
+    <p class="subtitle" style="margin-bottom:20px;">Every sale record is checked against the new-construction listings file by address. A match only counts if the sale happened within about 18 months of that address first appearing as a new-construction listing -- this prevents a much later resale of a once-new property from being miscounted. Address matching is exact-normalized text, so a small number of true matches may be missed due to formatting differences between sources. If the new-construction dataset only covers a recent time window, matches will be sparse or absent for older sales -- this reflects data coverage, not actual market share. When the matched count is small, the actual matched records are listed below the charts so the stat can be checked by eye rather than trusted blind.</p>
 
     <div class="kpi-row" id="market-overview-kpis"></div>
 
@@ -334,6 +334,17 @@
     <div class="chart-card">
       <h2>Median Sale Price: New Construction vs. Resale</h2>
       <div class="chart-wrap small"><canvas id="chartPriceByType"></canvas></div>
+    </div>
+
+    <div class="chart-card" id="nc-audit-card" style="display:none;">
+      <h2>Matched New-Construction Sales (Audit List)</h2>
+      <p class="subtitle" style="margin-bottom:16px;">Shown automatically when the matched count is small enough to review by eye. Check that these genuinely look like new-construction sales, not coincidental address overlaps.</p>
+      <div class="table-wrap">
+        <table id="nc-audit-table">
+          <thead><tr><th>Address</th><th>Sale Date</th><th>Sale Price</th><th>Construction Listing Date</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
     </div>
 
     <div class="chart-card" style="text-align:center;">
@@ -707,17 +718,59 @@ function normalizeAddress(addr){
 function renderMarketOverviewIfReady(){
   if(!salesLoaded || !constructionLoaded) return;
 
-  const ncAddresses = new Set(
-    constructionData.map(r=>normalizeAddress(r.formattedAddress)).filter(Boolean)
-  );
+  // Build a lookup from normalized address -> earliest listedDate seen for
+  // that address in the construction file (a property can appear multiple
+  // times as status changes).
+  const ncListingDates = {};
+  constructionData.forEach(r=>{
+    const na = normalizeAddress(r.formattedAddress);
+    if(!na || !r.listedDate) return;
+    if(!ncListingDates[na] || r.listedDate < ncListingDates[na]){
+      ncListingDates[na] = r.listedDate;
+    }
+  });
 
-  const tagged = salesData.map(r=>({
-    ...r,
-    _isNewConstruction: ncAddresses.has(normalizeAddress(r.formattedAddress)),
-  }));
+  // A sale only counts as "new construction" if the sale happened within
+  // ~18 months of that address first appearing as a new-construction
+  // listing. Without this window, a resale of a property years after it
+  // was originally new (or any coincidental address overlap) gets
+  // miscounted -- which is exactly what produced an implausible
+  // new-construction-cheaper-than-resale result before this fix.
+  const NC_MATCH_WINDOW_DAYS = 548; // ~18 months
+  const tagged = salesData.map(r=>{
+    const na = normalizeAddress(r.formattedAddress);
+    const listedDate = ncListingDates[na];
+    let isNC = false;
+    let daysDiff = null;
+    if(listedDate && r.lastSaleDate){
+      const d1 = new Date(listedDate), d2 = new Date(r.lastSaleDate);
+      if(!isNaN(d1) && !isNaN(d2)){
+        daysDiff = Math.abs((d2 - d1) / (1000*60*60*24));
+        isNC = daysDiff <= NC_MATCH_WINDOW_DAYS;
+      }
+    }
+    return {...r, _isNewConstruction: isNC, _ncListedDate: listedDate || null};
+  });
 
   const ncSales = tagged.filter(r=>r._isNewConstruction);
   const resales = tagged.filter(r=>!r._isNewConstruction);
+
+  // Audit list: show the actual matched records when the count is small
+  // enough to eyeball, so the stat is verifiable rather than a black box.
+  const auditCard = document.getElementById('nc-audit-card');
+  if(ncSales.length > 0 && ncSales.length <= 50){
+    auditCard.style.display = '';
+    document.querySelector('#nc-audit-table tbody').innerHTML = ncSales.map(r=>`
+      <tr>
+        <td>${r.formattedAddress||'—'}</td>
+        <td>${r.lastSaleDate?String(r.lastSaleDate).slice(0,10):'—'}</td>
+        <td>${fmtMoney(r.lastSalePrice)}</td>
+        <td>${r._ncListedDate?String(r._ncListedDate).slice(0,10):'—'}</td>
+      </tr>
+    `).join('');
+  } else {
+    auditCard.style.display = 'none';
+  }
 
   const container = document.getElementById('market-overview-kpis');
   const ncShare = tagged.length ? (ncSales.length/tagged.length*100) : null;
