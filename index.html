@@ -294,9 +294,6 @@
   th{
     background:var(--ink);
     color:var(--paper);
-    cursor:pointer;
-    position:sticky;
-    top:56px;
   }
   tr:hover td{background:#FBF9F2;}
   .table-wrap{overflow-x:auto;}
@@ -424,7 +421,7 @@
 
     <div class="chart-card" id="nc-audit-card" style="display:none;">
       <h2>Matched New-Construction Sales (Audit List)</h2>
-      <p class="subtitle" style="margin-bottom:16px;">Shown automatically when the matched count is small enough to review by eye. Check that these genuinely look like new-construction sales, not coincidental address overlaps.</p>
+      <p class="subtitle" style="margin-bottom:16px;">These are the specific sale records this dashboard automatically counted as "new construction" in the stats above &mdash; matched by comparing each sale's address and date against the new-construction listings dataset, not flagged by RentCast itself. This table exists for transparency, not as a task list: it's shown whenever the matched count is small enough to read at a glance, so the underlying percentage can be checked against real records instead of trusted blindly. If a row here doesn't look like a genuine new-construction sale, that's a signal the matching logic (address normalization, the ~18-month matching window) needs tightening, not that any individual sale needs manual correction.</p>
       <div class="table-wrap">
         <table id="nc-audit-table">
           <thead><tr><th>Address</th><th>Sale Date</th><th>Sale Price</th><th>Construction Listing Date</th></tr></thead>
@@ -870,11 +867,12 @@ let salesDrawnItems = null;
 let constructionDrawnItems = null;
 
 function renderSalesMap(){
-  // The map itself reflects the DATE filter only (not the drawn boundary --
-  // otherwise drawing a shape would immediately hide the very points you're
-  // trying to select). KPIs and charts apply the full filter, date + boundary.
-  const dateFiltered = salesData.filter(r => passesDateFilter(r.lastSaleDate, salesFilter));
-  const withCoords = dateFiltered.filter(r=>r.latitude && r.longitude);
+  // The map now reflects the FULL filter (date + drawn boundary), so
+  // after lassoing an area only the selected points remain visible --
+  // matching the KPIs/charts exactly rather than showing every point in
+  // the date range regardless of selection.
+  const filtered = getFilteredSales();
+  const withCoords = filtered.filter(r=>r.latitude && r.longitude);
   const points = sampleForMap(withCoords);
 
   if(!salesMapInstance){
@@ -904,6 +902,7 @@ function renderSalesMap(){
       renderSalesKpis();
       renderSalesChart();
       renderMarketOverviewIfReady();
+      renderSalesMap();
     });
   } else {
     salesMapInstance.eachLayer(l=>{ if(l instanceof L.CircleMarker) salesMapInstance.removeLayer(l); });
@@ -940,8 +939,11 @@ function renderSalesMap(){
 }
 
 function renderConstructionMap(){
-  const dateFiltered = constructionData.filter(r => passesDateFilter(r.listedDate || r.lastSeenDate, constructionFilter));
-  const withCoords = dateFiltered.filter(r=>r.latitude && r.longitude);
+  // Same reasoning as renderSalesMap: the map reflects the full filter
+  // (date + boundary) so a lasso selection actually filters what's shown,
+  // not just the KPIs.
+  const filtered = getFilteredConstruction();
+  const withCoords = filtered.filter(r=>r.latitude && r.longitude);
   const points = sampleForMap(withCoords);
 
   if(!constructionMapInstance){
@@ -971,6 +973,7 @@ function renderConstructionMap(){
       renderConstructionKpis();
       renderConstructionChart();
       renderMarketOverviewIfReady();
+      renderConstructionMap();
     });
   } else {
     constructionMapInstance.eachLayer(l=>{ if(l instanceof L.CircleMarker) constructionMapInstance.removeLayer(l); });
