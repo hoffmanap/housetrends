@@ -405,7 +405,7 @@
     </div>
 
     <h2 class="section-heading">Market Overview: New Construction vs. Resale</h2>
-    <p class="subtitle" style="margin-bottom:20px;">Every sale record is checked against the new-construction listings file by address. A match only counts if the sale happened within about 18 months of that address first appearing as a new-construction listing -- this prevents a much later resale of a once-new property from being miscounted. Address matching is exact-normalized text, so a small number of true matches may be missed due to formatting differences between sources. If the new-construction dataset only covers a recent time window, matches will be sparse or absent for older sales -- this reflects data coverage, not actual market share. When the matched count is small, the actual matched records are listed below the charts so the stat can be checked by eye rather than trusted blind.</p>
+    <p class="subtitle" style="margin-bottom:20px;">A sale is counted as new construction if it sold the same year it was built or the year after, using the sale record's own yearBuilt field &mdash; not by matching against the separate new-construction listings file, which was producing false positives in neighborhoods with no real new construction. One real gap: MLS-backup-sourced sales, the largest slice of this dataset, don't include yearBuilt, so this can only identify new construction where yearBuilt is actually populated (the combined 2019-2025 file, the investor export, and RentCast targeted-pull records). That means new construction is likely undercounted here, not overcounted. When the matched count is small, the actual matched records are listed below the charts so the stat can be checked by eye rather than trusted blind.</p>
 
     <div class="kpi-row" id="market-overview-kpis"></div>
 
@@ -421,10 +421,10 @@
 
     <div class="chart-card" id="nc-audit-card" style="display:none;">
       <h2>Matched New-Construction Sales (Audit List)</h2>
-      <p class="subtitle" style="margin-bottom:16px;">These are the specific sale records this dashboard automatically counted as "new construction" in the stats above &mdash; matched by comparing each sale's address and date against the new-construction listings dataset, not flagged by RentCast itself. This table exists for transparency, not as a task list: it's shown whenever the matched count is small enough to read at a glance, so the underlying percentage can be checked against real records instead of trusted blindly. If a row here doesn't look like a genuine new-construction sale, that's a signal the matching logic (address normalization, the ~18-month matching window) needs tightening, not that any individual sale needs manual correction.</p>
+      <p class="subtitle" style="margin-bottom:16px;">These are the specific sale records this dashboard automatically counted as "new construction" in the stats above &mdash; identified by comparing each sale's own yearBuilt to its sale date, not flagged by RentCast or any external source. This table exists for transparency, not as a task list: it's shown whenever the matched count is small enough to read at a glance, so the underlying percentage can be checked against real records instead of trusted blindly.</p>
       <div class="table-wrap">
         <table id="nc-audit-table">
-          <thead><tr><th>Address</th><th>Sale Date</th><th>Sale Price</th><th>Construction Listing Date</th></tr></thead>
+          <thead><tr><th>Address</th><th>Sale Date</th><th>Sale Price</th><th>Year Built</th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
@@ -890,7 +890,7 @@ function renderSalesMap(){
         polygon: {shapeOptions:{color:'#111111', weight:2, fillColor:'#FCE083', fillOpacity:0.25}},
         polyline:false, rectangle:false, circle:false, marker:false, circlemarker:false,
       },
-      edit: {featureGroup: salesDrawnItems, remove:false, edit:false},
+      edit: {featureGroup: salesDrawnItems, remove:true, edit:false},
     });
     salesMapInstance.addControl(drawControl);
     salesMapInstance.on('draw:created', e=>{
@@ -903,6 +903,12 @@ function renderSalesMap(){
       renderSalesChart();
       renderMarketOverviewIfReady();
       renderSalesMap();
+    });
+    // Second way to clear the boundary, via Leaflet.draw's own trash-can
+    // toolbar icon (click the polygon, then the delete tool) -- in addition
+    // to the "Clear Boundary" button, in case that button is ever missed.
+    salesMapInstance.on('draw:deleted', e=>{
+      clearSalesBoundary();
     });
   } else {
     salesMapInstance.eachLayer(l=>{ if(l instanceof L.CircleMarker) salesMapInstance.removeLayer(l); });
@@ -961,7 +967,7 @@ function renderConstructionMap(){
         polygon: {shapeOptions:{color:'#111111', weight:2, fillColor:'#BFE8D8', fillOpacity:0.25}},
         polyline:false, rectangle:false, circle:false, marker:false, circlemarker:false,
       },
-      edit: {featureGroup: constructionDrawnItems, remove:false, edit:false},
+      edit: {featureGroup: constructionDrawnItems, remove:true, edit:false},
     });
     constructionMapInstance.addControl(drawControl);
     constructionMapInstance.on('draw:created', e=>{
@@ -974,6 +980,9 @@ function renderConstructionMap(){
       renderConstructionChart();
       renderMarketOverviewIfReady();
       renderConstructionMap();
+    });
+    constructionMapInstance.on('draw:deleted', e=>{
+      clearConstructionBoundary();
     });
   } else {
     constructionMapInstance.eachLayer(l=>{ if(l instanceof L.CircleMarker) constructionMapInstance.removeLayer(l); });
@@ -1025,46 +1034,30 @@ function normalizeAddress(addr){
   return cleaned.split(' ').map(w => STREET_SUFFIX_MAP[w] || w).join(' ');
 }
 
+// A sale counts as new construction if it sold the same year it was built,
+// or the year after -- self-contained in the sale record, no cross-file
+// address matching needed. This replaces the old address-matching approach
+// against the construction listings file, which only checked whether an
+// address ever appeared there and was producing false positives in
+// neighborhoods with no real new construction.
+const NEW_CONSTRUCTION_MAX_YEAR_GAP = 1;
+
+function isLikelyNewConstruction(row){
+  const yearBuilt = parseInt(row.yearBuilt);
+  if(!yearBuilt || !row.lastSaleDate) return false;
+  const saleYear = parseInt(String(row.lastSaleDate).slice(0,4));
+  if(isNaN(saleYear)) return false;
+  const gap = saleYear - yearBuilt;
+  return gap >= 0 && gap <= NEW_CONSTRUCTION_MAX_YEAR_GAP;
+}
+
 function renderMarketOverviewIfReady(){
-  if(!salesLoaded || !constructionLoaded) return;
+  if(!salesLoaded) return;
 
-  // Build a lookup from normalized address -> earliest known date seen for
-  // that address in the construction file (a property can appear multiple
-  // times as status changes). Falls back to lastSeenDate when listedDate is
-  // missing -- RentCast doesn't reliably populate listedDate on older/
-  // backfilled listings, and without this fallback those rows silently drop
-  // out of both this matching step and the construction charts below.
-  const ncListingDates = {};
-  constructionData.forEach(r=>{
-    const na = normalizeAddress(r.formattedAddress);
-    const d = r.listedDate || r.lastSeenDate;
-    if(!na || !d) return;
-    if(!ncListingDates[na] || d < ncListingDates[na]){
-      ncListingDates[na] = d;
-    }
-  });
-
-  // A sale only counts as "new construction" if the sale happened within
-  // ~18 months of that address first appearing as a new-construction
-  // listing. Without this window, a resale of a property years after it
-  // was originally new (or any coincidental address overlap) gets
-  // miscounted -- which is exactly what produced an implausible
-  // new-construction-cheaper-than-resale result before this fix.
-  const NC_MATCH_WINDOW_DAYS = 548; // ~18 months
-  const tagged = getFilteredSales().map(r=>{
-    const na = normalizeAddress(r.formattedAddress);
-    const listedDate = ncListingDates[na];
-    let isNC = false;
-    let daysDiff = null;
-    if(listedDate && r.lastSaleDate){
-      const d1 = new Date(listedDate), d2 = new Date(r.lastSaleDate);
-      if(!isNaN(d1) && !isNaN(d2)){
-        daysDiff = Math.abs((d2 - d1) / (1000*60*60*24));
-        isNC = daysDiff <= NC_MATCH_WINDOW_DAYS;
-      }
-    }
-    return {...r, _isNewConstruction: isNC, _ncListedDate: listedDate || null};
-  });
+  const tagged = getFilteredSales().map(r=>({
+    ...r,
+    _isNewConstruction: isLikelyNewConstruction(r),
+  }));
 
   const ncSales = tagged.filter(r=>r._isNewConstruction);
   const resales = tagged.filter(r=>!r._isNewConstruction);
@@ -1079,7 +1072,7 @@ function renderMarketOverviewIfReady(){
         <td>${r.formattedAddress||'—'}</td>
         <td>${r.lastSaleDate?String(r.lastSaleDate).slice(0,10):'—'}</td>
         <td>${fmtMoney(r.lastSalePrice)}</td>
-        <td>${r._ncListedDate?String(r._ncListedDate).slice(0,10):'—'}</td>
+        <td>${r.yearBuilt||'—'}</td>
       </tr>
     `).join('');
   } else {
