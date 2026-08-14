@@ -10,6 +10,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
 <style>
   :root{
     --ink:#111111;
@@ -178,6 +180,78 @@
     height:460px;
     border:2px solid var(--ink);
   }
+  .map-controls{
+    display:flex;
+    flex-wrap:wrap;
+    gap:10px;
+    align-items:center;
+    margin-bottom:12px;
+  }
+  .filter-btn{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12px;
+    text-transform:uppercase;
+    padding:8px 14px;
+    background:#fff;
+    border:2px solid var(--ink);
+    cursor:pointer;
+  }
+  .filter-btn.active{
+    background:var(--ink);
+    color:var(--paper);
+  }
+  .filter-btn.lasso-active{
+    background:var(--yellow);
+  }
+  .filter-status{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12px;
+    padding:6px 10px;
+    background:var(--yellow);
+    border:1.5px solid var(--ink);
+    display:none;
+  }
+  .filter-status.showing{display:inline-block;}
+  .date-input{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12px;
+    padding:7px 10px;
+    border:2px solid var(--ink);
+    background:#fff;
+  }
+  /* Custom Leaflet popup styling to match the site design system instead
+     of Leaflet's default rounded white box */
+  .leaflet-popup-content-wrapper{
+    background:var(--paper);
+    border:2px solid var(--ink);
+    border-radius:0;
+    box-shadow:4px 4px 0 var(--ink);
+  }
+  .leaflet-popup-tip{
+    background:var(--paper);
+    border:2px solid var(--ink);
+    box-shadow:none;
+  }
+  .leaflet-popup-content{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12.5px;
+    line-height:1.6;
+    margin:12px 14px;
+  }
+  .leaflet-popup-content strong{
+    font-family:'Archivo Black',sans-serif;
+    font-size:13px;
+    text-transform:uppercase;
+    display:block;
+    margin-bottom:4px;
+  }
+  .leaflet-popup-close-button{
+    color:var(--ink) !important;
+    font-size:20px !important;
+  }
+  .leaflet-container{
+    font-family:'IBM Plex Mono',monospace;
+  }
   .map-legend{
     font-family:'IBM Plex Mono',monospace;
     font-size:12px;
@@ -267,6 +341,18 @@
 
   <!-- SALES PANEL -->
   <section id="panel-sales" class="panel active">
+    <div class="map-controls" id="sales-date-filter">
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;">DATE RANGE:</span>
+      <button class="filter-btn active" data-range="all" onclick="setSalesDateRange('all')">All Time</button>
+      <button class="filter-btn" data-range="4w" onclick="setSalesDateRange('4w')">Last 4 Weeks</button>
+      <button class="filter-btn" data-range="quarter" onclick="setSalesDateRange('quarter')">Last Quarter</button>
+      <button class="filter-btn" data-range="year" onclick="setSalesDateRange('year')">Last Year</button>
+      <input type="date" class="date-input" id="sales-date-start" onchange="setSalesDateRange('custom')">
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;">to</span>
+      <input type="date" class="date-input" id="sales-date-end" onchange="setSalesDateRange('custom')">
+      <span class="filter-status" id="sales-boundary-status">Boundary active</span>
+      <button class="filter-btn" id="sales-clear-boundary-btn" style="display:none;" onclick="clearSalesBoundary()">Clear Boundary</button>
+    </div>
     <div class="kpi-row" id="sales-kpis"></div>
     <p class="empty-note" id="sales-sample-note" style="margin-bottom:24px;"></p>
 
@@ -356,7 +442,7 @@
 
   <!-- CONSTRUCTION PANEL -->
   <section id="panel-construction" class="panel">
-    <p class="subtitle" style="margin-bottom:20px;">Trends are computed from new-construction listings grouped by the period below. Bedroom, bathroom, size, price, and days-on-market fields come directly from the listing record and are reliably populated. Room count, garage, pool, fireplace, and cooling/heating fields depend on a separate "features" data block that RentCast has not been returning for these listings in practice, so those are omitted here rather than shown mostly blank.</p>
+    <p class="subtitle" style="margin-bottom:20px;">Trends are computed from new-construction listings grouped by the period below, using listedDate where available and lastSeenDate as a fallback (RentCast doesn't reliably populate listedDate on older or backfilled listings). Bedroom, bathroom, size, price, and days-on-market fields come directly from the listing record and are reliably populated. Room count, garage, pool, fireplace, and cooling/heating fields depend on a separate "features" data block that RentCast has not been returning for these listings in practice, so those are omitted here rather than shown mostly blank.</p>
 
     <div class="controls" id="construction-period-toggle">
       <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;align-self:center;">GROUP BY:</span>
@@ -364,6 +450,19 @@
       <button class="period-btn active" data-period="month" onclick="setConstructionPeriod('month')">Monthly</button>
       <button class="period-btn" data-period="quarter" onclick="setConstructionPeriod('quarter')">Quarterly</button>
       <button class="period-btn" data-period="year" onclick="setConstructionPeriod('year')">Annual</button>
+    </div>
+
+    <div class="map-controls" id="construction-date-filter">
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;">DATE RANGE:</span>
+      <button class="filter-btn active" data-range="all" onclick="setConstructionDateRange('all')">All Time</button>
+      <button class="filter-btn" data-range="4w" onclick="setConstructionDateRange('4w')">Last 4 Weeks</button>
+      <button class="filter-btn" data-range="quarter" onclick="setConstructionDateRange('quarter')">Last Quarter</button>
+      <button class="filter-btn" data-range="year" onclick="setConstructionDateRange('year')">Last Year</button>
+      <input type="date" class="date-input" id="construction-date-start" onchange="setConstructionDateRange('custom')">
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;">to</span>
+      <input type="date" class="date-input" id="construction-date-end" onchange="setConstructionDateRange('custom')">
+      <span class="filter-status" id="construction-boundary-status">Boundary active</span>
+      <button class="filter-btn" id="construction-clear-boundary-btn" style="display:none;" onclick="clearConstructionBoundary()">Clear Boundary</button>
     </div>
 
     <div class="kpi-row" id="construction-kpis"></div>
@@ -474,6 +573,133 @@ function monthKey(dateStr){
   return String(dateStr).slice(0,7); // YYYY-MM
 }
 
+// ---------- SHARED FILTERING (date range + map lasso boundary) ----------
+// Each tab (sales, construction) has its own independent filter state.
+// Both the date range and the drawn polygon boundary are applied together
+// (AND logic) whenever they're active, and every KPI/chart/map on that tab
+// reads through the same filtered getter so nothing can drift out of sync.
+
+const salesFilter = {start:null, end:null, polygon:null};
+const constructionFilter = {start:null, end:null, polygon:null};
+
+function computeDateRange(preset, customStartEl, customEndEl){
+  const now = new Date();
+  if(preset === 'all') return {start:null, end:null};
+  if(preset === '4w'){
+    const start = new Date(now); start.setDate(start.getDate() - 28);
+    return {start, end:now};
+  }
+  if(preset === 'quarter'){
+    const start = new Date(now); start.setDate(start.getDate() - 91);
+    return {start, end:now};
+  }
+  if(preset === 'year'){
+    const start = new Date(now); start.setFullYear(start.getFullYear() - 1);
+    return {start, end:now};
+  }
+  if(preset === 'custom'){
+    const startVal = customStartEl.value, endVal = customEndEl.value;
+    return {
+      start: startVal ? new Date(startVal) : null,
+      end: endVal ? new Date(endVal) : null,
+    };
+  }
+  return {start:null, end:null};
+}
+
+// Standard ray-casting point-in-polygon test. polygon is an array of
+// {lat, lng} (as returned by Leaflet's layer.getLatLngs()[0]).
+function pointInPolygon(lat, lng, polygon){
+  let inside = false;
+  for(let i=0, j=polygon.length-1; i<polygon.length; j=i++){
+    const xi = polygon[i].lat, yi = polygon[i].lng;
+    const xj = polygon[j].lat, yj = polygon[j].lng;
+    const intersect = ((yi > lng) !== (yj > lng)) &&
+      (lat < (xj - xi) * (lng - yi) / (yj - yi) + xi);
+    if(intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function passesDateFilter(dateStr, filter){
+  if(!filter.start && !filter.end) return true;
+  if(!dateStr) return false;
+  const d = new Date(dateStr);
+  if(isNaN(d.getTime())) return false;
+  if(filter.start && d < filter.start) return false;
+  if(filter.end && d > filter.end) return false;
+  return true;
+}
+
+function passesBoundaryFilter(row, filter){
+  if(!filter.polygon) return true;
+  const lat = parseFloat(row.latitude), lng = parseFloat(row.longitude);
+  if(isNaN(lat) || isNaN(lng)) return false;
+  return pointInPolygon(lat, lng, filter.polygon);
+}
+
+function getFilteredSales(){
+  return salesData.filter(r =>
+    passesDateFilter(r.lastSaleDate, salesFilter) && passesBoundaryFilter(r, salesFilter)
+  );
+}
+
+function getFilteredConstruction(){
+  return constructionData.filter(r =>
+    passesDateFilter(r.listedDate || r.lastSeenDate, constructionFilter) && passesBoundaryFilter(r, constructionFilter)
+  );
+}
+
+function setSalesDateRange(preset){
+  const {start, end} = computeDateRange(preset, document.getElementById('sales-date-start'), document.getElementById('sales-date-end'));
+  salesFilter.start = start; salesFilter.end = end;
+  document.querySelectorAll('#sales-date-filter .filter-btn[data-range]').forEach(b=>{
+    b.classList.toggle('active', b.dataset.range === preset);
+  });
+  refreshSalesTab();
+}
+
+function setConstructionDateRange(preset){
+  const {start, end} = computeDateRange(preset, document.getElementById('construction-date-start'), document.getElementById('construction-date-end'));
+  constructionFilter.start = start; constructionFilter.end = end;
+  document.querySelectorAll('#construction-date-filter .filter-btn[data-range]').forEach(b=>{
+    b.classList.toggle('active', b.dataset.range === preset);
+  });
+  refreshConstructionTab();
+}
+
+function clearSalesBoundary(){
+  salesFilter.polygon = null;
+  if(salesDrawnItems) salesDrawnItems.clearLayers();
+  document.getElementById('sales-boundary-status').classList.remove('showing');
+  document.getElementById('sales-clear-boundary-btn').style.display = 'none';
+  refreshSalesTab();
+}
+
+function clearConstructionBoundary(){
+  constructionFilter.polygon = null;
+  if(constructionDrawnItems) constructionDrawnItems.clearLayers();
+  document.getElementById('construction-boundary-status').classList.remove('showing');
+  document.getElementById('construction-clear-boundary-btn').style.display = 'none';
+  refreshConstructionTab();
+}
+
+function refreshSalesTab(){
+  if(!salesLoaded) return;
+  renderSalesKpis();
+  renderSalesChart();
+  renderSalesMap();
+  renderMarketOverviewIfReady();
+}
+
+function refreshConstructionTab(){
+  if(!constructionLoaded) return;
+  renderConstructionKpis();
+  renderConstructionChart();
+  renderConstructionMap();
+  renderMarketOverviewIfReady();
+}
+
 // ---------- SALES ----------
 let salesPeriod = 'quarter';
 let salesLoaded = false;
@@ -506,8 +732,9 @@ function setSalesPeriod(period){
 }
 
 function buildSalesAgg(period){
+  const filtered = getFilteredSales();
   const byPeriod = {};
-  salesData.forEach(r=>{
+  filtered.forEach(r=>{
     const pk = periodKey(r.lastSaleDate, period);
     if(!pk) return;
     if(!byPeriod[pk]) byPeriod[pk] = {
@@ -527,20 +754,24 @@ function buildSalesAgg(period){
 }
 
 function renderSalesKpis(){
-  const prices = salesData.map(r=>r.lastSalePrice).filter(v=>v);
-  const pps = salesData.map(r=>r.price_per_sqft).filter(v=>v);
+  const filtered = getFilteredSales();
+  const prices = filtered.map(r=>r.lastSalePrice).filter(v=>v);
+  const pps = filtered.map(r=>r.price_per_sqft).filter(v=>v);
   const container = document.getElementById('sales-kpis');
   container.innerHTML = `
-    <div class="kpi mint"><span class="num">${fmtNum(salesData.length)}</span><span class="label">Sales on record</span></div>
+    <div class="kpi mint"><span class="num">${fmtNum(filtered.length)}</span><span class="label">Sales on record</span></div>
     <div class="kpi yellow"><span class="num">${fmtMoney(median(prices))}</span><span class="label">Median sale price</span></div>
     <div class="kpi salmon"><span class="num">${pps.length?'$'+fmtNum(median(pps),0):'—'}</span><span class="label">Median $ / sqft</span></div>
-    <div class="kpi lavender"><span class="num">${fmtNum(new Set(salesData.map(r=>r['zipCode'])).size)}</span><span class="label">Zip codes represented</span></div>
+    <div class="kpi lavender"><span class="num">${fmtNum(new Set(filtered.map(r=>r['zipCode'])).size)}</span><span class="label">Zip codes represented</span></div>
   `;
   const note = document.getElementById('sales-sample-note');
   if(note){
-    const mlsCount = salesData.filter(r=>r.source==='mls').length;
-    const otherCount = salesData.length - mlsCount;
-    note.innerHTML = `<strong>n = ${salesData.length}</strong> sale records on file. ${fmtNum(mlsCount)} come from a comprehensive MLS closed-sales export (through ${MLS_CUTOFF_DATE}); the remaining ${fmtNum(otherCount)} are disclosed sale prices from RentCast, covering periods MLS doesn't (both before MLS coverage begins and, on an ongoing basis, after it ends). Texas is a non-disclosure state, so the RentCast-only portion is a small, non-representative subset &mdash; treat any period covered solely by RentCast as directional, not comprehensive.`;
+    const mlsCount = filtered.filter(r=>r.source==='mls').length;
+    const otherCount = filtered.length - mlsCount;
+    const filterNote = (salesFilter.start || salesFilter.end || salesFilter.polygon)
+      ? ` Currently filtered to ${fmtNum(filtered.length)} of ${fmtNum(salesData.length)} total records.`
+      : '';
+    note.innerHTML = `<strong>n = ${filtered.length}</strong> sale records shown. ${fmtNum(mlsCount)} come from a comprehensive MLS closed-sales export (through ${MLS_CUTOFF_DATE}); the remaining ${fmtNum(otherCount)} are disclosed sale prices from RentCast, covering periods MLS doesn't. Texas is a non-disclosure state, so the RentCast-only portion is a small, non-representative subset &mdash; treat any period covered solely by RentCast as directional, not comprehensive.${filterNote}`;
   }
 }
 
@@ -635,19 +866,50 @@ function sampleForMap(rows){
   return shuffled.slice(0, MAP_SAMPLE_CAP);
 }
 
+let salesDrawnItems = null;
+let constructionDrawnItems = null;
+
 function renderSalesMap(){
-  const withCoords = salesData.filter(r=>r.latitude && r.longitude);
+  // The map itself reflects the DATE filter only (not the drawn boundary --
+  // otherwise drawing a shape would immediately hide the very points you're
+  // trying to select). KPIs and charts apply the full filter, date + boundary.
+  const dateFiltered = salesData.filter(r => passesDateFilter(r.lastSaleDate, salesFilter));
+  const withCoords = dateFiltered.filter(r=>r.latitude && r.longitude);
   const points = sampleForMap(withCoords);
 
   if(!salesMapInstance){
     salesMapInstance = L.map('salesMap', {preferCanvas:true}).setView(EL_PASO_CENTER, 11);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap contributors',
-      maxZoom: 18,
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+      maxZoom: 19,
+      subdomains: 'abcd',
     }).addTo(salesMapInstance);
+
+    salesDrawnItems = new L.FeatureGroup();
+    salesMapInstance.addLayer(salesDrawnItems);
+    const drawControl = new L.Control.Draw({
+      draw: {
+        polygon: {shapeOptions:{color:'#111111', weight:2, fillColor:'#FCE083', fillOpacity:0.25}},
+        polyline:false, rectangle:false, circle:false, marker:false, circlemarker:false,
+      },
+      edit: {featureGroup: salesDrawnItems, remove:false, edit:false},
+    });
+    salesMapInstance.addControl(drawControl);
+    salesMapInstance.on('draw:created', e=>{
+      salesDrawnItems.clearLayers();
+      salesDrawnItems.addLayer(e.layer);
+      salesFilter.polygon = e.layer.getLatLngs()[0];
+      document.getElementById('sales-boundary-status').classList.add('showing');
+      document.getElementById('sales-clear-boundary-btn').style.display = '';
+      renderSalesKpis();
+      renderSalesChart();
+      renderMarketOverviewIfReady();
+    });
+  } else {
+    salesMapInstance.eachLayer(l=>{ if(l instanceof L.CircleMarker) salesMapInstance.removeLayer(l); });
   }
 
-  const colorBySource = {mls:'#5a3ca0', pipeline:'#0a6b3d', targeted_pull:'#a3260a'};
+  const colorBySource = {mls:'#5a3ca0', pipeline:'#0a6b3d', targeted_pull:'#a3260a', investor_export:'#c98a00'};
   points.forEach(r=>{
     const lat = parseFloat(r.latitude), lon = parseFloat(r.longitude);
     if(isNaN(lat) || isNaN(lon)) return;
@@ -658,14 +920,17 @@ function renderSalesMap(){
       fillColor: colorBySource[r.source] || '#888888',
       fillOpacity:0.75,
     }).bindPopup(`
-      <strong>${r.formattedAddress||'—'}</strong><br>
+      <strong>${r.formattedAddress||'—'}</strong>
       ${fmtMoney(r.lastSalePrice)} &middot; ${r.lastSaleDate?String(r.lastSaleDate).slice(0,10):'—'}<br>
       ${fmtNum(r.bedrooms)} bd / ${fmtNum(r.bathrooms)} ba &middot; ${fmtNum(r.squareFootage)} sqft
     `).addTo(salesMapInstance);
   });
 
+  const existingNote = document.getElementById('sales-map-sample-note');
+  if(existingNote) existingNote.remove();
   if(withCoords.length > MAP_SAMPLE_CAP){
     const note = document.createElement('p');
+    note.id = 'sales-map-sample-note';
     note.className = 'empty-note';
     note.style.marginTop = '10px';
     note.style.fontSize = '13px';
@@ -675,15 +940,40 @@ function renderSalesMap(){
 }
 
 function renderConstructionMap(){
-  const withCoords = constructionData.filter(r=>r.latitude && r.longitude);
+  const dateFiltered = constructionData.filter(r => passesDateFilter(r.listedDate || r.lastSeenDate, constructionFilter));
+  const withCoords = dateFiltered.filter(r=>r.latitude && r.longitude);
   const points = sampleForMap(withCoords);
 
   if(!constructionMapInstance){
     constructionMapInstance = L.map('constructionMap', {preferCanvas:true}).setView(EL_PASO_CENTER, 11);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap contributors',
-      maxZoom: 18,
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+      maxZoom: 19,
+      subdomains: 'abcd',
     }).addTo(constructionMapInstance);
+
+    constructionDrawnItems = new L.FeatureGroup();
+    constructionMapInstance.addLayer(constructionDrawnItems);
+    const drawControl = new L.Control.Draw({
+      draw: {
+        polygon: {shapeOptions:{color:'#111111', weight:2, fillColor:'#BFE8D8', fillOpacity:0.25}},
+        polyline:false, rectangle:false, circle:false, marker:false, circlemarker:false,
+      },
+      edit: {featureGroup: constructionDrawnItems, remove:false, edit:false},
+    });
+    constructionMapInstance.addControl(drawControl);
+    constructionMapInstance.on('draw:created', e=>{
+      constructionDrawnItems.clearLayers();
+      constructionDrawnItems.addLayer(e.layer);
+      constructionFilter.polygon = e.layer.getLatLngs()[0];
+      document.getElementById('construction-boundary-status').classList.add('showing');
+      document.getElementById('construction-clear-boundary-btn').style.display = '';
+      renderConstructionKpis();
+      renderConstructionChart();
+      renderMarketOverviewIfReady();
+    });
+  } else {
+    constructionMapInstance.eachLayer(l=>{ if(l instanceof L.CircleMarker) constructionMapInstance.removeLayer(l); });
   }
 
   points.forEach(r=>{
@@ -705,28 +995,49 @@ function renderConstructionMap(){
 }
 
 // ---------- MARKET OVERVIEW (sales x new construction) ----------
+// Maps full street-suffix words to their standard USPS abbreviation, since
+// RentCast's construction data uses abbreviations ("Dr", "St", "Ct") while
+// MLS-sourced sales data uses full words ("Drive", "Street", "Court"). This
+// mismatch alone caused nearly every genuine address match to silently fail
+// -- confirmed by testing "5877 Dalhart Dr" vs "5877 Dalhart Drive" as the
+// same real property that the exact-match version treated as different.
+const STREET_SUFFIX_MAP = {
+  'DRIVE':'DR', 'STREET':'ST', 'AVENUE':'AVE', 'COURT':'CT', 'LANE':'LN',
+  'CIRCLE':'CIR', 'PLACE':'PL', 'BOULEVARD':'BLVD', 'ROAD':'RD',
+  'TRAIL':'TRL', 'PARKWAY':'PKWY', 'TERRACE':'TER', 'HIGHWAY':'HWY',
+  'SQUARE':'SQ', 'LOOP':'LOOP', 'CROSSING':'XING', 'POINT':'PT',
+  'HEIGHTS':'HTS', 'JUNCTION':'JCT', 'MOUNTAIN':'MTN', 'STATION':'STA',
+  'EXPRESSWAY':'EXPY', 'FREEWAY':'FWY', 'CAUSEWAY':'CSWY',
+};
+
 function normalizeAddress(addr){
   if(!addr) return '';
-  return String(addr)
+  const cleaned = String(addr)
     .toUpperCase()
     .replace(/,.*$/, '')          // drop everything from the first comma (city/state/zip)
     .replace(/[^A-Z0-9 ]/g, '')   // strip punctuation
     .replace(/\s+/g, ' ')
     .trim();
+  // Standardize street-suffix words to abbreviations, word by word
+  return cleaned.split(' ').map(w => STREET_SUFFIX_MAP[w] || w).join(' ');
 }
 
 function renderMarketOverviewIfReady(){
   if(!salesLoaded || !constructionLoaded) return;
 
-  // Build a lookup from normalized address -> earliest listedDate seen for
+  // Build a lookup from normalized address -> earliest known date seen for
   // that address in the construction file (a property can appear multiple
-  // times as status changes).
+  // times as status changes). Falls back to lastSeenDate when listedDate is
+  // missing -- RentCast doesn't reliably populate listedDate on older/
+  // backfilled listings, and without this fallback those rows silently drop
+  // out of both this matching step and the construction charts below.
   const ncListingDates = {};
   constructionData.forEach(r=>{
     const na = normalizeAddress(r.formattedAddress);
-    if(!na || !r.listedDate) return;
-    if(!ncListingDates[na] || r.listedDate < ncListingDates[na]){
-      ncListingDates[na] = r.listedDate;
+    const d = r.listedDate || r.lastSeenDate;
+    if(!na || !d) return;
+    if(!ncListingDates[na] || d < ncListingDates[na]){
+      ncListingDates[na] = d;
     }
   });
 
@@ -737,7 +1048,7 @@ function renderMarketOverviewIfReady(){
   // miscounted -- which is exactly what produced an implausible
   // new-construction-cheaper-than-resale result before this fix.
   const NC_MATCH_WINDOW_DAYS = 548; // ~18 months
-  const tagged = salesData.map(r=>{
+  const tagged = getFilteredSales().map(r=>{
     const na = normalizeAddress(r.formattedAddress);
     const listedDate = ncListingDates[na];
     let isNC = false;
@@ -891,9 +1202,13 @@ function periodKey(dateStr, period){
 // lotSize:[], price:[], pricePerSqft:[], daysOnMarket:[], hoaFees:[],
 // hoaN, builders:Set, propertyTypes:{type:count}, total} }
 function buildAgg(period){
+  const filtered = getFilteredConstruction();
   const byPeriod = {};
-  constructionData.forEach(r=>{
-    const pk = periodKey(r.listedDate, period);
+  filtered.forEach(r=>{
+    // Falls back to lastSeenDate when listedDate is missing, same reasoning
+    // as the market-overview matching above -- otherwise older/backfilled
+    // listings with a blank listedDate silently vanish from every chart.
+    const pk = periodKey(r.listedDate || r.lastSeenDate, period);
     if(!pk) return;
     if(!byPeriod[pk]) byPeriod[pk] = {
       count:0, bedrooms:[], bathrooms:[], squareFootage:[], lotSize:[],
