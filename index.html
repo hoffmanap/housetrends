@@ -462,6 +462,12 @@
       <button class="filter-btn" id="construction-clear-boundary-btn" style="display:none;" onclick="clearConstructionBoundary()">Clear Boundary</button>
     </div>
 
+    <div class="map-controls" id="construction-quality-filter">
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;">DATA QUALITY:</span>
+      <button class="filter-btn active" onclick="toggleConstructionQualityFilter()" id="construction-quality-toggle">Hide implausible "new construction" (yearBuilt too old)</button>
+      <span class="filter-status" id="construction-quality-note"></span>
+    </div>
+
     <div class="kpi-row" id="construction-kpis"></div>
 
     <div class="chart-card">
@@ -635,6 +641,31 @@ function passesBoundaryFilter(row, filter){
   return pointInPolygon(lat, lng, filter.polygon);
 }
 
+// RentCast tags listings listingType=New Construction itself -- this
+// dashboard doesn't decide that classification. But that tagging can be
+// wrong (an older resale mistakenly carrying the New Construction label).
+// Applying the same yearBuilt-proximity logic used on the sales side as a
+// plausibility check: if a listing's own yearBuilt is much older than when
+// it was listed, it's very unlikely to genuinely be new construction,
+// regardless of what RentCast's listingType says.
+const CONSTRUCTION_PLAUSIBLE_MAX_AGE_YEARS = 3;
+let constructionQualityFilterOn = true;
+
+function isPlausibleNewConstruction(row){
+  const yearBuilt = parseInt(row.yearBuilt);
+  const refDate = row.listedDate || row.lastSeenDate;
+  if(!yearBuilt || !refDate) return true; // no data to judge on -- don't exclude, just can't confirm
+  const refYear = parseInt(String(refDate).slice(0,4));
+  if(isNaN(refYear)) return true;
+  return (refYear - yearBuilt) <= CONSTRUCTION_PLAUSIBLE_MAX_AGE_YEARS;
+}
+
+function toggleConstructionQualityFilter(){
+  constructionQualityFilterOn = !constructionQualityFilterOn;
+  document.getElementById('construction-quality-toggle').classList.toggle('active', constructionQualityFilterOn);
+  refreshConstructionTab();
+}
+
 function getFilteredSales(){
   return salesData.filter(r =>
     passesDateFilter(r.lastSaleDate, salesFilter) && passesBoundaryFilter(r, salesFilter)
@@ -642,9 +673,24 @@ function getFilteredSales(){
 }
 
 function getFilteredConstruction(){
-  return constructionData.filter(r =>
+  const dateAndBoundaryFiltered = constructionData.filter(r =>
     passesDateFilter(r.listedDate || r.lastSeenDate, constructionFilter) && passesBoundaryFilter(r, constructionFilter)
   );
+  const result = constructionQualityFilterOn
+    ? dateAndBoundaryFiltered.filter(isPlausibleNewConstruction)
+    : dateAndBoundaryFiltered;
+
+  const note = document.getElementById('construction-quality-note');
+  if(note){
+    const excluded = dateAndBoundaryFiltered.length - result.length;
+    if(constructionQualityFilterOn && excluded > 0){
+      note.textContent = `${excluded.toLocaleString()} listing(s) hidden: yearBuilt more than ${CONSTRUCTION_PLAUSIBLE_MAX_AGE_YEARS} years before listing date`;
+      note.classList.add('showing');
+    } else {
+      note.classList.remove('showing');
+    }
+  }
+  return result;
 }
 
 function setSalesDateRange(preset){
@@ -877,10 +923,13 @@ function renderSalesMap(){
 
   if(!salesMapInstance){
     salesMapInstance = L.map('salesMap', {preferCanvas:true}).setView(EL_PASO_CENTER, 11);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-      maxZoom: 19,
-      subdomains: 'abcd',
+    // Esri's World Light Gray Canvas: free, no API key, no licensing
+    // ambiguity (CartoDB's basemap CDN now states commercial use requires
+    // an Enterprise license, which was silently breaking tile loading --
+    // the map controls rendered fine but no tiles ever appeared).
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+      attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ',
+      maxZoom: 16,
     }).addTo(salesMapInstance);
 
     salesDrawnItems = new L.FeatureGroup();
@@ -954,10 +1003,9 @@ function renderConstructionMap(){
 
   if(!constructionMapInstance){
     constructionMapInstance = L.map('constructionMap', {preferCanvas:true}).setView(EL_PASO_CENTER, 11);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-      maxZoom: 19,
-      subdomains: 'abcd',
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+      attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ',
+      maxZoom: 16,
     }).addTo(constructionMapInstance);
 
     constructionDrawnItems = new L.FeatureGroup();
