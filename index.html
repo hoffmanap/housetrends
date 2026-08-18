@@ -405,6 +405,7 @@
     </div>
 
     <h2 class="section-heading">Market Overview: New Construction vs. Resale</h2>
+    <p class="subtitle" style="margin-bottom:12px;"><strong>This is a proxy, not a verified count.</strong> The New Construction tab shows listings RentCast itself tagged as new construction &mdash; a direct classification. The figures below are different: they're inferred from each individual <em>sale</em>, by checking whether the sale's own yearBuilt is the same year it sold or the year after. No sale here is confirmed to be a new-construction transaction; it's a reasonable guess based on one field. Because these two tabs measure different things through different methods, their trends will not always match, and that's expected &mdash; a dip or cliff on this tab often reflects a gap in yearBuilt data for that period, not an actual change in how much new construction sold. Treat this section as a rough read on the resale/new-construction mix among sales, and the New Construction tab as the more reliable source for new-construction volume itself.</p>
     <p class="subtitle" style="margin-bottom:20px;">A sale is counted as new construction if it sold the same year it was built or the year after, using the sale record's own yearBuilt field &mdash; not by matching against the separate new-construction listings file, which was producing false positives in neighborhoods with no real new construction. One real gap: MLS-backup-sourced sales, the largest slice of this dataset, don't include yearBuilt, so this can only identify new construction where yearBuilt is actually populated (the combined 2019-2025 file, the investor export, and RentCast targeted-pull records). That means new construction is likely undercounted here, not overcounted. When the matched count is small, the actual matched records are listed below the charts so the stat can be checked by eye rather than trusted blind.</p>
 
     <div class="kpi-row" id="market-overview-kpis"></div>
@@ -439,7 +440,7 @@
 
   <!-- CONSTRUCTION PANEL -->
   <section id="panel-construction" class="panel">
-    <p class="subtitle" style="margin-bottom:20px;">Trends are computed from new-construction listings grouped by the period below, using listedDate where available and lastSeenDate as a fallback (RentCast doesn't reliably populate listedDate on older or backfilled listings). Bedroom, bathroom, size, price, and days-on-market fields come directly from the listing record and are reliably populated. Room count, garage, pool, fireplace, and cooling/heating fields depend on a separate "features" data block that RentCast has not been returning for these listings in practice, so those are omitted here rather than shown mostly blank.</p>
+    <p class="subtitle" style="margin-bottom:20px;">Trends are computed from new-construction listings grouped by the period below, using listedDate where available and lastSeenDate as a fallback (RentCast doesn't reliably populate listedDate on older or backfilled listings). Bedroom, bathroom, size, price, and days-on-market fields come directly from the listing record and are reliably populated. Room count, garage, pool, fireplace, and cooling/heating fields depend on a separate "features" data block that RentCast has not been returning for these listings in practice, so those are omitted here rather than shown mostly blank. <strong>This is the verified new-construction data</strong> &mdash; listings RentCast itself classified as new construction. The Sales Prices tab also shows a "new construction" figure, but that one is an inferred proxy built from each sale's yearBuilt field, not a direct match to this data; the two won't always agree, and this tab is the more reliable source for new-construction volume.</p>
 
     <div class="controls" id="construction-period-toggle">
       <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;align-self:center;">GROUP BY:</span>
@@ -555,6 +556,15 @@ function showTab(name){
   document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
   document.getElementById('panel-'+name).classList.add('active');
   document.getElementById('tab-btn-'+name).classList.add('active');
+  // Leaflet computes its tile grid against the container's size at init
+  // time. If a map is created while its tab panel is display:none (which
+  // both maps are, until their tab is first shown), it only ever loads a
+  // sliver of tiles in one corner. Telling it to recheck its size on every
+  // tab switch fixes this permanently, not just on first load.
+  setTimeout(()=>{
+    if(name==='sales' && salesMapInstance) salesMapInstance.invalidateSize();
+    if(name==='construction' && constructionMapInstance) constructionMapInstance.invalidateSize();
+  }, 0);
 }
 
 function fmtMoney(v){
@@ -571,9 +581,25 @@ function median(arr){
   const mid=Math.floor(s.length/2);
   return s.length%2 ? s[mid] : (s[mid-1]+s[mid])/2;
 }
+// PapaParse's dynamicTyping:true auto-converts ISO datetime strings with a
+// "T...Z" suffix (RentCast's native date format, used for listedDate and
+// lastSeenDate on construction records, and on the small set of
+// targeted_pull sales) into real JavaScript Date objects -- but leaves
+// plain "YYYY-MM-DD" strings (everything else) as strings. Any code that
+// then does String(dateValue).slice(...) on a Date object gets
+// Date.prototype.toString()'s output ("Mon Apr 15 2024 00:00:00 GMT...")
+// instead of the ISO date, silently producing garbage like "Mon Apr" for
+// chart labels and date-math. Every date field must go through this
+// helper before being treated as a string.
+function dateToISOString(val){
+  if(!val) return '';
+  if(val instanceof Date) return val.toISOString();
+  return String(val);
+}
+
 function monthKey(dateStr){
   if(!dateStr) return null;
-  return String(dateStr).slice(0,7); // YYYY-MM
+  return dateToISOString(dateStr).slice(0,7); // YYYY-MM
 }
 
 // ---------- SHARED FILTERING (date range + map lasso boundary) ----------
@@ -655,7 +681,7 @@ function isPlausibleNewConstruction(row){
   const yearBuilt = parseInt(row.yearBuilt);
   const refDate = row.listedDate || row.lastSeenDate;
   if(!yearBuilt || !refDate) return true; // no data to judge on -- don't exclude, just can't confirm
-  const refYear = parseInt(String(refDate).slice(0,4));
+  const refYear = parseInt(dateToISOString(refDate).slice(0,4));
   if(isNaN(refYear)) return true;
   return (refYear - yearBuilt) <= CONSTRUCTION_PLAUSIBLE_MAX_AGE_YEARS;
 }
@@ -975,7 +1001,7 @@ function renderSalesMap(){
       fillOpacity:0.75,
     }).bindPopup(`
       <strong>${r.formattedAddress||'—'}</strong>
-      ${fmtMoney(r.lastSalePrice)} &middot; ${r.lastSaleDate?String(r.lastSaleDate).slice(0,10):'—'}<br>
+      ${fmtMoney(r.lastSalePrice)} &middot; ${r.lastSaleDate?dateToISOString(r.lastSaleDate).slice(0,10):'—'}<br>
       ${fmtNum(r.bedrooms)} bd / ${fmtNum(r.bathrooms)} ba &middot; ${fmtNum(r.squareFootage)} sqft
     `).addTo(salesMapInstance);
   });
@@ -1093,7 +1119,7 @@ const NEW_CONSTRUCTION_MAX_YEAR_GAP = 1;
 function isLikelyNewConstruction(row){
   const yearBuilt = parseInt(row.yearBuilt);
   if(!yearBuilt || !row.lastSaleDate) return false;
-  const saleYear = parseInt(String(row.lastSaleDate).slice(0,4));
+  const saleYear = parseInt(dateToISOString(row.lastSaleDate).slice(0,4));
   if(isNaN(saleYear)) return false;
   const gap = saleYear - yearBuilt;
   return gap >= 0 && gap <= NEW_CONSTRUCTION_MAX_YEAR_GAP;
@@ -1118,7 +1144,7 @@ function renderMarketOverviewIfReady(){
     document.querySelector('#nc-audit-table tbody').innerHTML = ncSales.map(r=>`
       <tr>
         <td>${r.formattedAddress||'—'}</td>
-        <td>${r.lastSaleDate?String(r.lastSaleDate).slice(0,10):'—'}</td>
+        <td>${r.lastSaleDate?dateToISOString(r.lastSaleDate).slice(0,10):'—'}</td>
         <td>${fmtMoney(r.lastSalePrice)}</td>
         <td>${r.yearBuilt||'—'}</td>
       </tr>
@@ -1220,7 +1246,7 @@ function setConstructionPeriod(period){
 // Groups a date string into a period bucket key, sortable as a string.
 function periodKey(dateStr, period){
   if(!dateStr) return null;
-  const s = String(dateStr);
+  const s = dateToISOString(dateStr);
   const d = new Date(s);
   if(isNaN(d.getTime())) return null;
 
