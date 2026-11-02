@@ -108,6 +108,29 @@ def api_get(path: str, params: dict, api_key: str) -> list:
     return []
 
 
+def _dict_reader_or_die(f, csv_path: Path):
+    """
+    csv.DictReader that fails loudly if the file isn't actually
+    comma-delimited with an "id" column, instead of silently producing
+    rows with the wrong keys (which used to surface downstream as an
+    opaque KeyError: 'id'). This file is meant to be touched only by
+    this script's own DictWriter; if it's ever hand-edited/re-saved by
+    a spreadsheet app it can come back tab-delimited, which looks fine
+    to open but breaks the comma-based parser here.
+    """
+    reader = csv.DictReader(f)
+    if reader.fieldnames is None or "id" not in reader.fieldnames:
+        raise RuntimeError(
+            f"{csv_path} doesn't look like a comma-delimited CSV with an "
+            f"'id' column (got fieldnames={reader.fieldnames!r}). This "
+            "usually means the file was hand-edited or re-saved by a "
+            "spreadsheet app with a different delimiter (e.g. tabs). "
+            "Re-export it as a standard comma-delimited CSV before "
+            "running the pipeline again."
+        )
+    return reader
+
+
 def load_existing_keys(csv_path: Path, key_fields: tuple) -> dict:
     """
     Returns {record_id: composite_key_value_used_for_change_detection}
@@ -117,7 +140,7 @@ def load_existing_keys(csv_path: Path, key_fields: tuple) -> dict:
     if not csv_path.exists():
         return existing
     with open(csv_path, newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
+        for row in _dict_reader_or_die(f, csv_path):
             rid = row.get("id")
             if rid:
                 existing[rid] = tuple(row.get(k, "") for k in key_fields)
@@ -132,7 +155,7 @@ def rewrite_csv_with_updates(csv_path: Path, fields: list, updated_rows: dict):
     all_rows = {}
     if csv_path.exists():
         with open(csv_path, newline="", encoding="utf-8") as f:
-            for row in csv.DictReader(f):
+            for row in _dict_reader_or_die(f, csv_path):
                 all_rows[row["id"]] = row
     all_rows.update(updated_rows)
 
